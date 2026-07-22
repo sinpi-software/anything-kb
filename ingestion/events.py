@@ -1,0 +1,2 @@
+PREFECT_EVENTS_NAMESPACE = "software.sinpi.desk.rss_feed"
+RSS_FEED_FETCHED_EVENT_NAME = f"{PREFECT_EVENTS_NAMESPACE}.fetched"

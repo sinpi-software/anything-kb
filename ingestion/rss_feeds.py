@@ -1,4 +1,3 @@
-from enum import Enum
 from uuid import UUID
 
 import curl_cffi
@@ -9,13 +8,8 @@ from prefect.logging import get_run_logger
 from sqlalchemy import func, update
 
 from db import get_postgres_session
-from models import Artifact, RssFeed, RssFeedItem, Transformation
+from models import Artifact, RssFeed, RssFeedItem
 from sanitize import sanitize
-
-
-class TransformationTypes(Enum):
-    RSS_TO_ITEMS = "extract_rss_items"
-    RSS_ITEM_TO_MARKDOWN = "convert_rss_feed_item_to_markdown"
 
 
 @task
@@ -82,14 +76,6 @@ def parse_rss_feed_as_rss_feed_item(rss_feed_id: UUID, artifact_id: UUID) -> lis
 
         session.flush()
         created = [str(item.id) for item in new_rss_feed_items]
-
-        transformation = Transformation(
-            artifact_id=artifact_id,
-            type=TransformationTypes.RSS_TO_ITEMS.value,
-            context=created,
-        )
-        session.add(transformation)
-
         session.commit()
 
     logger.info("Parsed %d new items for feed %s", len(created), rss_feed_id)
@@ -156,13 +142,6 @@ def extract_rss_feed_item_artifact_as_markdown_artifact(rss_feed_item_id: str, a
             session.add(markdown_artifact)
             session.flush()
             markdown_artifact_id = markdown_artifact.id
-
-            transformation = Transformation(
-                artifact_id=artifact_id,
-                type=TransformationTypes.RSS_ITEM_TO_MARKDOWN.value,
-                context=[str(markdown_artifact_id)],
-            )
-            session.add(transformation)
             session.commit()
 
     return markdown_artifact_id

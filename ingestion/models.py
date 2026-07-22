@@ -121,8 +121,10 @@ class Transformation(_BaseModel):
     __tablename__ = "transformations"
     artifact_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=False)
     artifact: Mapped["Artifact"] = relationship("Artifact", backref="transformations")
-    context: Mapped[dict] = mapped_column(JSONB, nullable=True)
     type: Mapped[str] = mapped_column(TEXT, nullable=False)
+    context: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    metadata: Mapped[dict] = mapped_column(JSONB, nullable=True)
 
 
 class RssFeedItem(_BaseModel):

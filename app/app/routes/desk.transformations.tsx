@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useFetcher, type SubmitTarget } from "react-router";
 import { toast } from "sonner";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, GripVertical } from "lucide-react";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Route } from "./+types/desk.transformations";
 import { listTransformations, type TransformationRow } from "~/services/transformations.server";
 import {
@@ -73,6 +76,11 @@ function fetcherFailed(data: unknown): boolean {
 export default function TransformationsPage({ loaderData }: Route.ComponentProps) {
   const { orgId, transformations } = loaderData;
   const addFetcher = useFetcher();
+  const reorderFetcher = useFetcher();
+  const [order, setOrder] = useState<TransformationRow[]>(transformations);
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  useEffect(() => setOrder(transformations), [transformations]);
 
   useEffect(() => {
     if (addFetcher.state === "idle" && fetcherFailed(addFetcher.data)) {
@@ -80,10 +88,30 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
     }
   }, [addFetcher.state, addFetcher.data]);
 
+  useEffect(() => {
+    if (reorderFetcher.state === "idle" && fetcherFailed(reorderFetcher.data)) {
+      setOrder(transformations); // revert to last known-good
+      toast.error("Couldn't reorder — try again");
+    }
+  }, [reorderFetcher.state, reorderFetcher.data, transformations]);
+
   function add() {
     addFetcher.submit(
       { org_id: orgId, type: "summarize", prompt: "New transformation" },
       { method: "POST", action: "/api/transformations", encType: "application/json" },
+    );
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = order.findIndex((r) => r.id === active.id);
+    const newIndex = order.findIndex((r) => r.id === over.id);
+    const next = arrayMove(order, oldIndex, newIndex);
+    setOrder(next); // optimistic
+    reorderFetcher.submit(
+      { org_id: orgId, ids: next.map((r) => r.id) },
+      { method: "PATCH", action: "/api/transformations", encType: "application/json" },
     );
   }
 
@@ -93,29 +121,36 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
         <h1 className="text-2xl font-semibold tracking-tight">Transformations</h1>
         <Button onClick={add} disabled={addFetcher.state !== "idle"}><Plus className="mr-1 size-4" /> Add</Button>
       </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-12">#</TableHead>
-            <TableHead className="w-40">Type</TableHead>
-            <TableHead className="w-56">Model</TableHead>
-            <TableHead>Prompt</TableHead>
-            <TableHead>Params</TableHead>
-            <TableHead className="w-12" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {transformations.map((row) => (
-            <EditableRow key={row.id} row={row} />
-          ))}
-        </TableBody>
-      </Table>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={order.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead className="w-12">#</TableHead>
+                <TableHead className="w-40">Type</TableHead>
+                <TableHead className="w-56">Model</TableHead>
+                <TableHead>Prompt</TableHead>
+                <TableHead>Params</TableHead>
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {order.map((row) => (
+                <EditableRow key={row.id} row={row} />
+              ))}
+            </TableBody>
+          </Table>
+        </SortableContext>
+      </DndContext>
     </main>
   );
 }
 
 function EditableRow({ row }: { row: TransformationRow }) {
   const fetcher = useFetcher();
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: row.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
   const [draft, setDraft] = useState<Draft>(() => toDraft(row));
   const [confirming, setConfirming] = useState(false);
 
@@ -143,7 +178,18 @@ function EditableRow({ row }: { row: TransformationRow }) {
   }
 
   return (
-    <TableRow>
+    <TableRow ref={setNodeRef} style={style}>
+      <TableCell>
+        <button
+          type="button"
+          className="cursor-grab text-muted-foreground"
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder"
+        >
+          <GripVertical className="size-4" />
+        </button>
+      </TableCell>
       <TableCell>{row.position}</TableCell>
       <TableCell>
         <Select

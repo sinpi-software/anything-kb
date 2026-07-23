@@ -53,7 +53,9 @@ def main() -> None:
             )
         ],
     )
-    serve(ingest, transform)  # type: ignore[arg-type]  # to_deployment returns RunnerDeployment in sync context
+    # limit caps concurrent flow runs (each is an OS subprocess) so a burst of
+    # event-triggered transform runs can't spawn dozens at once and thrash the machine.
+    serve(ingest, transform, limit=config.SERVE_FLOW_RUN_LIMIT)  # type: ignore[arg-type]  # RunnerDeployment in sync ctx
 
 
 if __name__ == "__main__":

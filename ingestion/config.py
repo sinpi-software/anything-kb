@@ -7,6 +7,10 @@ from typing import Final
 FLOW_NAME = "poll-rss-feeds"
 POLL_INTERVAL_SECONDS = 60 * 60
 TRANSFORM_PIPELINE_DEPLOYMENT_NAME = "transform-pipeline"
+# Max flow runs `serve` executes at once. Each run is its own OS subprocess, so an
+# uncapped serve spawns one per event (e.g. one per ingested article) and can thrash
+# the machine. Keep this low; the transform pipeline is the bulk of the fan-out.
+SERVE_FLOW_RUN_LIMIT = 3
 
 # --- Concurrency (name -> max concurrent) ---
 # v2 global concurrency limits, applied to the server on startup by main.ensure_concurrency_limits()

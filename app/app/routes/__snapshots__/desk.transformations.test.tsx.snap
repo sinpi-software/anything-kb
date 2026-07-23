@@ -1,0 +1,122 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TransformationsPage > renders the transform chain table 1`] = `
+<div>
+  <main
+    class="mx-auto max-w-4xl px-6 py-10"
+  >
+    <h1
+      class="mb-6 text-2xl font-semibold tracking-tight"
+    >
+      Transformations
+    </h1>
+    <div
+      class="relative w-full overflow-x-auto"
+      data-slot="table-container"
+    >
+      <table
+        class="w-full caption-bottom text-sm"
+        data-slot="table"
+      >
+        <thead
+          class="[&_tr]:border-b"
+          data-slot="table-header"
+        >
+          <tr
+            class="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors"
+            data-slot="table-row"
+          >
+            <th
+              class="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-16"
+              data-slot="table-head"
+            >
+              #
+            </th>
+            <th
+              class="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-head"
+            >
+              Type
+            </th>
+            <th
+              class="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-head"
+            >
+              Model
+            </th>
+            <th
+              class="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-head"
+            >
+              Prompt
+            </th>
+          </tr>
+        </thead>
+        <tbody
+          class="[&_tr:last-child]:border-0"
+          data-slot="table-body"
+        >
+          <tr
+            class="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors"
+            data-slot="table-row"
+          >
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              0
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              summarize
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              —
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] max-w-md truncate"
+              data-slot="table-cell"
+            >
+              Summarize the article
+            </td>
+          </tr>
+          <tr
+            class="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors"
+            data-slot="table-row"
+          >
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              1
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              score
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+              data-slot="table-cell"
+            >
+              openai/gpt-4o
+            </td>
+            <td
+              class="p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] max-w-md truncate"
+              data-slot="table-cell"
+            >
+              Score it
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+`;

@@ -189,18 +189,24 @@ def rss_feed_flow() -> None:
     # Ingestion ends at markdown extraction. Each extraction emits a
     # MARKDOWN_ARTIFACT_CREATED_EVENT that triggers the transform-pipeline flow separately.
     item_extractions = []
+    remaining = config.MAX_ITEMS_PER_POLL
     for rss_feed_id, url in rss_feeds:
         rss_feed_artifact_id = fetch_rss_feed_as_artifact.submit(rss_feed_id, url)  # type: ignore[call-overload]
         parse_rss_feed_as_rss_feed_item.submit(  # type: ignore[call-overload]
             rss_feed_id, rss_feed_artifact_id
         ).result()
 
-        # Process every pending item for the feed — new ones plus any stranded by a prior failed run.
+        # Process up to `remaining` pending items this cycle (new ones plus any stranded by a
+        # prior failed run). The rest stay PENDING and drain over later polls, so a feed with
+        # hundreds of new items can't flood the transform pipeline at once.
+        if remaining <= 0:
+            continue
         with get_postgres_session() as session:
             pending_item_ids = [
                 str(item.id)
                 for item in session.query(RssFeedItem)
                 .filter_by(feed_id=rss_feed_id, status=RssFeedItemStatus.PENDING.value)
+                .limit(remaining)
                 .all()
             ]
 
@@ -210,6 +216,7 @@ def rss_feed_flow() -> None:
                 rss_feed_item_id, rss_feed_item_artifact_id
             )
             item_extractions.append((rss_feed_item_id, extraction))
+        remaining -= len(pending_item_ids)
 
     for item_id, extraction in item_extractions:
         extraction.wait()

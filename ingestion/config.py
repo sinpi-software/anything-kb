@@ -11,6 +11,10 @@ TRANSFORM_PIPELINE_DEPLOYMENT_NAME = "transform-pipeline"
 # uncapped serve spawns one per event (e.g. one per ingested article) and can thrash
 # the machine. Keep this low; the transform pipeline is the bulk of the fan-out.
 SERVE_FLOW_RUN_LIMIT = 3
+# Max feed items processed per poll cycle (each becomes a markdown artifact -> transform
+# run). The remainder stay PENDING and drain over later cycles, so a feed with hundreds
+# of new items can't flood the pipeline at once.
+MAX_ITEMS_PER_POLL = 25
 
 # --- Concurrency (name -> max concurrent) ---
 # v2 global concurrency limits, applied to the server on startup by main.ensure_concurrency_limits()

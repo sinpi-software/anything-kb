@@ -23,7 +23,7 @@ class LLMParams(BaseModel):
 
 
 class _TransformOutput(BaseModel):
-    def to_artifact(self) -> tuple[str, str]:
+    def to_model(self) -> tuple[str, str]:
         """(data, content_type) for the produced artifact; JSON unless a subclass overrides."""
         return self.model_dump_json(), "application/json"
 
@@ -36,7 +36,7 @@ class LLMScoreTransformOutput(_TransformOutput):
 class LLMSummarizeTransformOutput(_TransformOutput):
     summary: str
 
-    def to_artifact(self) -> tuple[str, str]:
+    def to_model(self) -> tuple[str, str]:
         # A summary is prose — store it as markdown so the next chain step reads plain text.
         return self.summary, "text/markdown"
 
@@ -87,7 +87,7 @@ def _run_llm_transform(
                 raise ValueError("LLM returned no text content")
 
             output = output_type.model_validate_json(content)
-            data, content_type = output.to_artifact()
+            data, content_type = output.to_model()
             out_artifact = Artifact(
                 org_id=org_id,
                 ref_table_name=Artifact.__tablename__,

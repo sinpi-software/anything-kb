@@ -634,9 +634,9 @@ import { Toaster } from "~/components/ui/sonner";
 ```
 Add `<Toaster />` just before the closing tag that wraps `<Outlet />` (typically right after `{children}` in the `Layout` body). Keep it a single instance.
 
-- [ ] **Step 5: Write `ParamsFields.tsx`**
+- [ ] **Step 3: Write `ParamsFields.tsx`**
 
-`app/components/transformations/ParamsFields.tsx`:
+`app/app/components/transformations/ParamsFields.tsx`:
 ```tsx
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -703,9 +703,9 @@ export function ParamsFields({
 }
 ```
 
-- [ ] **Step 6: Write the view route (read-only table for now)**
+- [ ] **Step 4: Write the view route (read-only table for now, replacing the Task 4 placeholder)**
 
-`app/routes/desk.transformations.tsx`:
+`app/app/routes/desk.transformations.tsx`:
 ```tsx
 import type { Route } from "./+types/desk.transformations";
 import { listTransformations } from "~/services/transformations.server";
@@ -746,9 +746,9 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
 }
 ```
 
-- [ ] **Step 7: Write the snapshot test**
+- [ ] **Step 5: Write the snapshot test**
 
-`app/routes/desk.transformations.test.tsx`:
+`app/app/routes/desk.transformations.test.tsx` (note: `createdAt`/`updatedAt` are **string**-mode timestamps in the introspected schema — use ISO strings, not `new Date()`, so the fixtures type-check):
 ```tsx
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
@@ -756,8 +756,8 @@ import { createRoutesStub } from "react-router";
 import TransformationsPage from "./desk.transformations";
 
 const rows = [
-  { id: "1", position: 0, type: "summarize", model: null, prompt: "Summarize the article", orgId: "o", params: null, createdAt: new Date(0), updatedAt: new Date(0), createdById: null, updatedById: null },
-  { id: "2", position: 1, type: "score", model: "openai/gpt-4o", prompt: "Score it", orgId: "o", params: null, createdAt: new Date(0), updatedAt: new Date(0), createdById: null, updatedById: null },
+  { id: "1", position: 0, type: "summarize", model: null, prompt: "Summarize the article", orgId: "o", params: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
+  { id: "2", position: 1, type: "score", model: "openai/gpt-4o", prompt: "Score it", orgId: "o", params: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
 ];
 
 describe("TransformationsPage", () => {
@@ -771,20 +771,20 @@ describe("TransformationsPage", () => {
 });
 ```
 
-- [ ] **Step 8: Run the tests**
+- [ ] **Step 6: Run the tests**
 
 Run: `cd app && npm test`
 Expected: PASS — the snapshot is written on first run; schema and reorder tests still green. (Docker Postgres must be running for the reorder test.)
 
-- [ ] **Step 9: Verify in the browser**
+- [ ] **Step 7: Verify in the browser**
 
 With `npm run dev` running, open `http://localhost:5173/desk/<seeded-org-id>/transformations`. Expected: a table listing the 2 seeded transformations (summarize at #0, score at #1). Look at it — the table renders, not a blank page or error boundary.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add app/vitest.config.ts app/test app/routes/desk.transformations.tsx app/routes/desk.transformations.test.tsx app/components/transformations/ParamsFields.tsx app/components/ui app/root.tsx app/package.json app/package-lock.json app/app.css
-git commit -m "feat(app): read-only transformations view + test harness"
+git add app/app/routes/desk.transformations.tsx app/app/routes/desk.transformations.test.tsx app/app/routes/__snapshots__ app/app/components/transformations/ParamsFields.tsx app/app/components/ui app/app/root.tsx app/package.json app/package-lock.json app/app/app.css app/components.json
+git commit -m "feat(app): read-only transformations view + shadcn components"
 ```
 
 ---

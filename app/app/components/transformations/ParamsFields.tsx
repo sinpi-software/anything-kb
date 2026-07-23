@@ -1,3 +1,4 @@
+import { Field } from "@base-ui/react/field";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
@@ -37,7 +38,7 @@ export function ParamsFields({
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
         {KNOWN_KEYS.map((key) => (
-          <div key={key} className="flex flex-col gap-1">
+          <Field.Root key={key} className="flex flex-col gap-1">
             <Label htmlFor={`param-${key}`} className="text-xs text-muted-foreground">{key}</Label>
             <Input
               id={`param-${key}`}
@@ -45,10 +46,10 @@ export function ParamsFields({
               value={value.known[key]}
               onChange={(e) => onChange({ ...value, known: { ...value.known, [key]: e.target.value } })}
             />
-          </div>
+          </Field.Root>
         ))}
       </div>
-      <div className="flex flex-col gap-1">
+      <Field.Root className="flex flex-col gap-1">
         <Label htmlFor="param-extra" className="text-xs text-muted-foreground">extra (JSON)</Label>
         <Textarea
           id="param-extra"
@@ -57,7 +58,7 @@ export function ParamsFields({
           value={value.extraJson}
           onChange={(e) => onChange({ ...value, extraJson: e.target.value })}
         />
-      </div>
+      </Field.Root>
     </div>
   );
 }

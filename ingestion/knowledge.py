@@ -78,6 +78,15 @@ def normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", name).strip().lower()
 
 
+# Lucene special characters (plus the two-char operators) that must be backslash-escaped
+# before a raw name is dropped into a full-text query string.
+_LUCENE_SPECIAL = re.compile(r'([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)')
+
+
+def escape_lucene(text: str) -> str:
+    return _LUCENE_SPECIAL.sub(r"\\\1", text)
+
+
 def candidate_query(org_id: str, entity_type: str, name_normalized: str, limit: int) -> tuple[str, dict[str, Any]]:
     # Exact/alias match within the org + type; scoped by org_id.
     query = (
@@ -90,6 +99,27 @@ def candidate_query(org_id: str, entity_type: str, name_normalized: str, limit: 
         "org_id": org_id,
         "type": entity_type,
         "name_normalized": name_normalized,
+        "limit": limit,
+    }
+    return query, params
+
+
+def fulltext_candidate_query(
+    org_id: str, entity_type: str, query_text: str, limit: int
+) -> tuple[str, dict[str, Any]]:
+    # Full-text match over name + aliases (the `entity_name` index from bootstrap_schema),
+    # then filtered down to the org + type — queryNodes searches across ALL orgs, so this
+    # WHERE clause is the only thing keeping the lookup org-scoped.
+    query = (
+        "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score "
+        "WHERE e.org_id = $org_id AND e.type = $type "
+        "RETURN e.id AS id, e.name AS name, e.summary AS summary "
+        "ORDER BY score DESC LIMIT $limit"
+    )
+    params: dict[str, Any] = {
+        "q": escape_lucene(query_text),
+        "org_id": org_id,
+        "type": entity_type,
         "limit": limit,
     }
     return query, params
@@ -116,10 +146,26 @@ def resolve_entity(
     entity: ExtractedEntity,
     llm_params: dict[str, Any],
 ) -> str | None:
-    query, params = candidate_query(
-        org_id, entity.type, normalize_name(entity.name), config.KNOWLEDGE_RESOLUTION_CANDIDATES
-    )
+    limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
+    query, params = candidate_query(org_id, entity.type, normalize_name(entity.name), limit)
     candidates = [dict(record) for record in session.run(query, params)]
+
+    # Full-text match catches name variants (e.g. "Barack Obama" vs "President Obama") that
+    # exact/alias matching above misses. A malformed or empty query string shouldn't fail
+    # resolution — it just contributes zero extra candidates.
+    ft_query, ft_params = fulltext_candidate_query(org_id, entity.type, entity.name, limit)
+    try:
+        ft_candidates = [dict(record) for record in session.run(ft_query, ft_params)]
+    except Exception:
+        ft_candidates = []
+
+    seen_ids = {c["id"] for c in candidates}
+    for c in ft_candidates:
+        if c["id"] not in seen_ids:
+            candidates.append(c)
+            seen_ids.add(c["id"])
+    candidates = candidates[:limit]
+
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -216,6 +262,12 @@ class KnowledgeTransformOutput(BaseModel):
 
 
 def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
+    # SQLAlchemy's UUID(as_uuid=True) columns hand back uuid.UUID objects, not str
+    # (despite the Mapped[str] annotation). Neo4j's driver rejects raw UUID objects
+    # as query parameters, so every id is coerced to str before it touches the graph.
+    # run_transform_pipeline chains a prior transform's raw output id straight into
+    # this function's artifact_id, so the coercion has to happen here, not upstream.
+    artifact_id = str(artifact_id)
     with get_postgres_session() as session:
         transformation = session.get(Transformation, transformation_id)
         if transformation is None:
@@ -231,9 +283,6 @@ def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
             raise ValueError(f"Artifact {artifact_id} not found")
         if artifact.org_id is None:
             raise ValueError(f"Artifact {artifact_id} has no org")
-        # SQLAlchemy's UUID(as_uuid=True) columns hand back uuid.UUID objects, not str
-        # (despite the Mapped[str] annotation). Neo4j's driver rejects raw UUID objects
-        # as query parameters, so every id is coerced to str before it touches the graph.
         org_id = str(artifact.org_id)
         text = artifact.data
 
@@ -243,8 +292,11 @@ def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
             extraction = extract_knowledge(client, model, prompt, entity_types, text, llm_params)
 
         name_to_id: dict[str, str] = {}
+        allowed = {t.lower() for t in entity_types}
         with get_neo4j_session() as neo:
             for entity in extraction.entities:
+                if entity.type.lower() not in allowed:
+                    continue
                 existing_id = resolve_entity(neo, client, model, org_id, entity, llm_params)
                 if existing_id is None:
                     entity_id = str(uuid.uuid4())

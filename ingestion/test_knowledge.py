@@ -21,6 +21,8 @@ from knowledge import (  # noqa: E402
     KnowledgeExtraction,
     build_extraction_messages,
     candidate_query,
+    escape_lucene,
+    fulltext_candidate_query,
     normalize_name,
     upsert_entity,
     write_provenance,
@@ -103,6 +105,21 @@ def test_candidate_query_is_org_and_type_scoped() -> None:
     assert params["type"] == "Person"
     assert params["name_normalized"] == "ada lovelace"
     assert params["limit"] == 5
+
+
+def test_fulltext_candidate_query_is_org_and_type_scoped() -> None:
+    query, params = fulltext_candidate_query("org-1", "Person", "ada lovelace", 5)
+    assert "org_id" in query
+    assert "type" in query
+    assert params["org_id"] == "org-1"
+    assert params["type"] == "Person"
+    assert params["q"] == "ada lovelace"
+    assert params["limit"] == 5
+
+
+def test_escape_lucene_escapes_special_characters() -> None:
+    assert escape_lucene("a+b:c") == "a\\+b\\:c"
+    assert escape_lucene('(quoted "phrase")') == '\\(quoted \\"phrase\\"\\)'
 
 
 class _FakeMessage:
@@ -268,6 +285,44 @@ def test_org_isolation() -> None:
         _cleanup(org_b)
 
 
+@requires_neo4j
+def test_fulltext_candidate_query_matches_name_variants_and_is_org_scoped() -> None:
+    """Proves the `entity_name` full-text index (from bootstrap_schema) is actually wired
+    into candidate lookup: two differently-named-but-related entities in the same org both
+    surface for a shared-token query, while a same-token entity in a different org does not."""
+    bootstrap_schema()
+    org_a, org_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    try:
+        with get_neo4j_session() as session:
+            upsert_entity(
+                session,
+                org_a,
+                str(uuid.uuid4()),
+                ExtractedEntity(name="Barack Obama", type="Person", description="d"),
+                "s1",
+            )
+            upsert_entity(
+                session,
+                org_a,
+                str(uuid.uuid4()),
+                ExtractedEntity(name="President Obama", type="Person", description="d"),
+                "s2",
+            )
+            upsert_entity(
+                session,
+                org_b,
+                str(uuid.uuid4()),
+                ExtractedEntity(name="Obama Fried Chicken", type="Person", description="d"),
+                "s3",
+            )
+            query, params = fulltext_candidate_query(org_a, "Person", "Obama", 5)
+            names = {r["name"] for r in session.run(query, params)}
+            assert names == {"Barack Obama", "President Obama"}  # both org_a variants found
+    finally:
+        _cleanup(org_a)
+        _cleanup(org_b)
+
+
 class _NullClient:
     """Stands in for OpenRouter. `chat.send` must never be reached because every
     LLM-backed function (extract_knowledge, resolve_entity, merge_summary) is monkeypatched
@@ -290,6 +345,9 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
         entities=[
             ExtractedEntity(name="Ada", type="Person", description="Mathematician"),
             ExtractedEntity(name="Engine", type="Thing", description="A machine"),
+            # Not in the transformation's entity_types ("Person", "Thing") below — must be
+            # filtered out before it ever reaches the graph.
+            ExtractedEntity(name="Rover", type="Robot", description="Not an allowed type"),
         ],
         relationships=[knowledge_mod.ExtractedRelationship(source_name="Ada", target_name="Engine", type="WORKED_ON")],
     )
@@ -321,7 +379,10 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
             )
             session.add(artifact)
             session.flush()
-            artifact_id = str(artifact.id)
+            # Raw ORM value (a real uuid.UUID at runtime, despite the Mapped[str] annotation) —
+            # exercises run_knowledge_transform's artifact_id coercion, same as the live
+            # pipeline does when chaining a prior transform's output id into this one.
+            artifact_id = artifact.id
 
             transformation = Transformation(
                 org_id=org_id,
@@ -341,7 +402,7 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
             entity_count = neo.run(
                 "MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_id_str}
             ).single(True)["c"]
-            assert entity_count == 2
+            assert entity_count == 2  # the off-list-type "Rover" entity was filtered, not written
             rel_count = neo.run(
                 "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN count(r) AS c", {"o": org_id_str}
             ).single(True)["c"]
@@ -354,7 +415,7 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
             assert payload.entities_created == 2
             assert payload.entities_merged == 0
             assert payload.relationships_created == 1
-            assert payload.source_artifact_id == artifact_id
+            assert payload.source_artifact_id == str(artifact_id)
     finally:
         if org_id_str is not None:
             _cleanup(org_id_str)

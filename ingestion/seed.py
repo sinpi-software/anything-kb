@@ -92,20 +92,27 @@ def seed_database() -> None:
         # Ordered transform chain for the org — each step's output feeds the next (by position).
         transform_model = "openai/gpt-5-nano"
         transform_chain = [
-            (0, TransformationType.SUMMARIZE.value, "Summarize this article in 3 concise sentences."),
+            (0, TransformationType.SUMMARIZE.value, "Summarize this article in 3 concise sentences.", None),
             (
                 1,
                 TransformationType.SCORE.value,
                 "Given this summary, is the story newsworthy? Score 0-10 with a short rationale.",
+                None,
+            ),
+            (
+                2,
+                TransformationType.KNOWLEDGE.value,
+                "Extract the notable entities and how they relate from this article.",
+                {"entity_types": ["Person", "Place", "Organization", "Topic", "Story"]},
             ),
         ]
         transforms_created = []
-        for position, transform_type, prompt in transform_chain:
-            validate_transform_config(transform_type, transform_model, prompt, None)
+        for position, transform_type, prompt, params in transform_chain:
+            validate_transform_config(transform_type, transform_model, prompt, params)
             _transform, created = get_or_create(
                 session,
                 Transformation,
-                defaults=dict(type=transform_type, model=transform_model, prompt=prompt, **audit),
+                defaults=dict(type=transform_type, model=transform_model, prompt=prompt, params=params, **audit),
                 org_id=org.id,
                 position=position,
             )

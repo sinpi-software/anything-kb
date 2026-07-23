@@ -8,11 +8,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   return Response.json(await listTransformations(orgId));
 }
 
-export async function action({ request }: Route.ActionArgs) {
-  const body = (await request.json()) as Record<string, unknown>;
-  const orgId = typeof body.org_id === "string" ? body.org_id : null;
+async function readJson(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    return (await request.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
+export async function action({ request }: Route.ActionArgs) {
   if (request.method === "POST") {
+    const body = await readJson(request);
+    if (!body) return Response.json({ error: "invalid JSON body" }, { status: 422 });
+    const orgId = typeof body.org_id === "string" ? body.org_id : null;
     if (!orgId) return Response.json({ error: "org_id is required" }, { status: 400 });
     const parsed = transformationInputSchema.safeParse(body);
     if (!parsed.success) return Response.json({ errors: parsed.error.flatten() }, { status: 422 });
@@ -20,8 +28,12 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (request.method === "PATCH") {
+    const body = await readJson(request);
+    if (!body) return Response.json({ error: "invalid JSON body" }, { status: 422 });
+    const orgId = typeof body.org_id === "string" ? body.org_id : null;
+    if (!orgId) return Response.json({ error: "org_id is required" }, { status: 400 });
     const parsed = reorderSchema.safeParse(body);
-    if (!orgId || !parsed.success) return Response.json({ error: "invalid reorder request" }, { status: 422 });
+    if (!parsed.success) return Response.json({ error: "invalid reorder request" }, { status: 422 });
     await reorderTransformations(orgId, parsed.data.ids);
     return Response.json({ ok: true });
   }

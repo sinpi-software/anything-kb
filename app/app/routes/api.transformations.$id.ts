@@ -6,7 +6,12 @@ export async function action({ request, params }: Route.ActionArgs) {
   const { id } = params;
 
   if (request.method === "PATCH") {
-    const body = (await request.json()) as Record<string, unknown>;
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: "invalid JSON body" }, { status: 422 });
+    }
     const parsed = transformationInputSchema.safeParse(body);
     if (!parsed.success) return Response.json({ errors: parsed.error.flatten() }, { status: 422 });
     const row = await updateTransformation(id, parsed.data);

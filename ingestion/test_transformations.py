@@ -1,5 +1,6 @@
 import pytest
 
+from models import TransformationType
 from transformations import LLMParams, LLMScoreTransformOutput, validate_transform_config
 
 
@@ -31,3 +32,17 @@ def test_validate_score_requires_model() -> None:
 def test_validate_score_requires_prompt() -> None:
     with pytest.raises(ValueError, match="requires a prompt"):
         validate_transform_config("score", "m", "", None)
+
+
+def test_validate_knowledge_requires_entity_types_when_missing() -> None:
+    with pytest.raises(ValueError, match="entity_types"):
+        validate_transform_config(TransformationType.KNOWLEDGE.value, "m", "p", None)
+
+
+def test_validate_knowledge_requires_entity_types_when_empty() -> None:
+    with pytest.raises(ValueError, match="entity_types"):
+        validate_transform_config(TransformationType.KNOWLEDGE.value, "m", "p", {"entity_types": []})
+
+
+def test_validate_knowledge_config_ok() -> None:
+    validate_transform_config(TransformationType.KNOWLEDGE.value, "m", "p", {"entity_types": ["Person"]})

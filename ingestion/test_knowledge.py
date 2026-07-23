@@ -1,5 +1,6 @@
 import os
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import text as sqlalchemy_text
@@ -102,6 +103,120 @@ def test_candidate_query_is_org_and_type_scoped() -> None:
     assert params["type"] == "Person"
     assert params["name_normalized"] == "ada lovelace"
     assert params["limit"] == 5
+
+
+class _FakeMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content: str) -> None:
+        self.message = _FakeMessage(content)
+
+
+class _FakeChatResult:
+    def __init__(self, content: str) -> None:
+        self.choices = [_FakeChoice(content)]
+
+
+class _FakeChat:
+    """Stands in for OpenRouter's `client.chat`; records whether `.send` was invoked
+    so tests can assert the single-/zero-candidate paths never reach the LLM."""
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+        self.send_called = False
+
+    def send(self, **kwargs: Any) -> _FakeChatResult:
+        self.send_called = True
+        return _FakeChatResult(self.answer)
+
+
+class _FakeResolutionClient:
+    """Stands in for OpenRouter, exposing only the `.chat.send` surface resolve_entity uses."""
+
+    def __init__(self, answer: str) -> None:
+        self.chat = _FakeChat(answer)
+
+
+class _FakeNeoSession:
+    """Stands in for a Neo4j Session; `.run` returns pre-baked candidate records
+    regardless of the query/params passed, so no real Neo4j connection is needed."""
+
+    def __init__(self, records: list[dict[str, Any]]) -> None:
+        self.records = records
+
+    def run(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.records
+
+
+def _resolution_entity() -> ExtractedEntity:
+    return ExtractedEntity(name="Ada", type="Person", description="Mathematician")
+
+
+def test_resolve_entity_multi_candidate_valid_answer_returns_id() -> None:
+    session = _FakeNeoSession(
+        [{"id": "a", "name": "Ada", "summary": "s1"}, {"id": "b", "name": "Ada Byron", "summary": "s2"}]
+    )
+    client = _FakeResolutionClient("a")
+    result = knowledge_mod.resolve_entity(
+        session,  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
+        "model",
+        "org-1",
+        _resolution_entity(),
+        {},
+    )
+    assert result == "a"
+    assert client.chat.send_called
+
+
+def test_resolve_entity_multi_candidate_hallucinated_answer_returns_none() -> None:
+    session = _FakeNeoSession(
+        [{"id": "a", "name": "Ada", "summary": "s1"}, {"id": "b", "name": "Ada Byron", "summary": "s2"}]
+    )
+    client = _FakeResolutionClient("not-a-real-id")
+    result = knowledge_mod.resolve_entity(
+        session,  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
+        "model",
+        "org-1",
+        _resolution_entity(),
+        {},
+    )
+    assert result is None
+    assert client.chat.send_called
+
+
+def test_resolve_entity_single_candidate_skips_llm() -> None:
+    session = _FakeNeoSession([{"id": "a", "name": "Ada", "summary": "s1"}])
+    client = _FakeResolutionClient("a")
+    result = knowledge_mod.resolve_entity(
+        session,  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
+        "model",
+        "org-1",
+        _resolution_entity(),
+        {},
+    )
+    assert result == "a"
+    assert not client.chat.send_called
+
+
+def test_resolve_entity_no_candidates_skips_llm() -> None:
+    session = _FakeNeoSession([])
+    client = _FakeResolutionClient("a")
+    result = knowledge_mod.resolve_entity(
+        session,  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
+        "model",
+        "org-1",
+        _resolution_entity(),
+        {},
+    )
+    assert result is None
+    assert not client.chat.send_called
 
 
 def _cleanup(org_id: str) -> None:

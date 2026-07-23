@@ -127,11 +127,12 @@ def resolve_entity(
     # Same plain str-keyed dict shape as extract_knowledge above; mypy resolves this call
     # (no response_format kwarg) to a single overload and flags the messages arg directly,
     # rather than the ambiguous-overload error extract_knowledge triggers.
-    result = client.chat.send(
-        model=model,
-        messages=build_resolution_messages(entity, candidates),  # type: ignore[arg-type]
-        **llm_params,
-    )
+    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
+        result = client.chat.send(
+            model=model,
+            messages=build_resolution_messages(entity, candidates),  # type: ignore[arg-type]
+            **llm_params,
+        )
     content = result.choices[0].message.content
     answer = content.strip() if isinstance(content, str) else "NEW"
     valid_ids = {str(c["id"]) for c in candidates}

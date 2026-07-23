@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher, type SubmitTarget } from "react-router";
+import { useForm } from "@tanstack/react-form";
 import { toast } from "sonner";
 import { Trash2, Plus, GripVertical } from "lucide-react";
 import {
@@ -32,22 +33,17 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Textarea } from "~/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
-import { ParamsFields, paramsFromRecord, type ParamsFieldsValue } from "~/components/transformations/ParamsFields";
+import { ParamsFields, paramsFromRecord } from "~/components/transformations/ParamsFields";
 
 export async function loader({ params }: Route.LoaderArgs) {
   return { orgId: params.org_id, transformations: await listTransformations(params.org_id) };
 }
 
-type Draft = {
-  type: (typeof TRANSFORMATION_TYPES)[number];
-  model: string;
-  prompt: string;
-  params: ParamsFieldsValue;
-};
+type Draft = ReturnType<typeof toDraft>;
 
-function toDraft(row: TransformationRow): Draft {
+function toDraft(row: TransformationRow) {
   return {
-    type: row.type as Draft["type"],
+    type: row.type as (typeof TRANSFORMATION_TYPES)[number],
     model: row.model ?? "",
     prompt: row.prompt,
     params: paramsFromRecord(row.params as Record<string, unknown> | null),
@@ -164,12 +160,35 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
   );
 }
 
+// Autosave: persist a field ~500ms after the last change. The type select uses
+// the immediate variant since a discrete choice has no mid-edit state to debounce.
+const DEBOUNCED_AUTOSAVE_MS = 500;
+
 function EditableRow({ row }: { row: TransformationRow }) {
   const fetcher = useFetcher();
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: row.id });
-  const style = { transform: CSS.Transform.toString(transform), transition };
-  const [draft, setDraft] = useState<Draft>(() => toDraft(row));
+  const sortable = useSortable({ id: row.id });
+  const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
   const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const defaultValues = useMemo(() => toDraft(row), [row]);
+
+  const form = useForm({
+    defaultValues,
+    onSubmit: ({ value }) => {
+      const payload = buildPayload(value);
+      if (!payload.ok) {
+        setError(payload.error);
+        return;
+      }
+      setError(null);
+      fetcher.submit(payload.value as SubmitTarget, {
+        method: "PATCH",
+        action: `/api/transformations/${row.id}`,
+        encType: "application/json",
+      });
+    },
+  });
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcherFailed(fetcher.data)) {
@@ -177,31 +196,20 @@ function EditableRow({ row }: { row: TransformationRow }) {
     }
   }, [fetcher.state, fetcher.data]);
 
-  function save(next: Draft) {
-    const payload = buildPayload(next);
-    if (!payload.ok) {
-      toast.error(payload.error);
-      return;
-    }
-    fetcher.submit(payload.value as SubmitTarget, {
-      method: "PATCH",
-      action: `/api/transformations/${row.id}`,
-      encType: "application/json",
-    });
-  }
-
   function remove() {
     fetcher.submit(null, { method: "DELETE", action: `/api/transformations/${row.id}`, encType: "application/json" });
   }
 
+  const debounced = { onChangeDebounceMs: DEBOUNCED_AUTOSAVE_MS, onChange: () => form.handleSubmit() };
+
   return (
-    <TableRow ref={setNodeRef} style={style}>
+    <TableRow ref={sortable.setNodeRef} style={style}>
       <TableCell>
         <button
           type="button"
           className="cursor-grab text-muted-foreground"
-          {...attributes}
-          {...listeners}
+          {...sortable.attributes}
+          {...sortable.listeners}
           aria-label="Drag to reorder"
         >
           <GripVertical className="size-4" />
@@ -209,40 +217,52 @@ function EditableRow({ row }: { row: TransformationRow }) {
       </TableCell>
       <TableCell>{row.position}</TableCell>
       <TableCell>
-        <Select
-          value={draft.type}
-          onValueChange={(type) => {
-            if (!type) return;
-            const next = { ...draft, type: type as Draft["type"] };
-            setDraft(next);
-            save(next);
-          }}
-        >
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {TRANSFORMATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <form.Field name="type" listeners={{ onChange: () => form.handleSubmit() }}>
+          {(field) => (
+            <Select
+              value={field.state.value}
+              onValueChange={(type) => {
+                if (!type) return;
+                field.handleChange(type as Draft["type"]);
+              }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TRANSFORMATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+        </form.Field>
       </TableCell>
       <TableCell>
-        <Input
-          value={draft.model}
-          onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-          onBlur={() => save(draft)}
-          placeholder="openai/gpt-4o"
-        />
+        <form.Field name="model" listeners={debounced}>
+          {(field) => (
+            <Input
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              onBlur={field.handleBlur}
+              placeholder="openai/gpt-4o"
+            />
+          )}
+        </form.Field>
       </TableCell>
       <TableCell>
-        <Textarea
-          rows={2}
-          value={draft.prompt}
-          onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
-          onBlur={() => save(draft)}
-        />
+        <form.Field name="prompt" listeners={debounced}>
+          {(field) => (
+            <Textarea
+              rows={2}
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              onBlur={field.handleBlur}
+            />
+          )}
+        </form.Field>
       </TableCell>
       <TableCell>
-        <ParamsFields value={draft.params} onChange={(params) => setDraft({ ...draft, params })} />
-        <Button variant="ghost" size="sm" className="mt-1" onClick={() => save(draft)}>Save params</Button>
+        <form.Field name="params" listeners={debounced}>
+          {(field) => <ParamsFields value={field.state.value} onChange={field.handleChange} />}
+        </form.Field>
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </TableCell>
       <TableCell>
         {confirming ? (

@@ -31,9 +31,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Textarea } from "~/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { ParamsFields, paramsFromRecord } from "~/components/transformations/ParamsFields";
+import { PromptEditor } from "~/components/transformations/PromptEditor";
 
 export async function loader({ params }: Route.LoaderArgs) {
   return { orgId: params.org_id, transformations: await listTransformations(params.org_id) };
@@ -274,10 +274,9 @@ function EditableRow({ row }: { row: TransformationRow }) {
                 <span className="text-xs text-muted-foreground">Prompt</span>
                 <form.Field name="prompt" listeners={debounced}>
                   {(field) => (
-                    <Textarea
-                      rows={4}
+                    <PromptEditor
                       value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
+                      onChange={field.handleChange}
                       onBlur={field.handleBlur}
                     />
                   )}

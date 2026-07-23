@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@plugin "@tailwindcss/typography";
 
 /* Follow the OS colour scheme — `dark:` utilities apply when the system prefers dark. */
 @custom-variant dark {

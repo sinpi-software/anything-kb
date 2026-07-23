@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const TRANSFORMATION_TYPES = ["score", "summarize", "classify"] as const;
+export const TRANSFORMATION_TYPES = ["score", "summarize", "classify", "knowledge"] as const;
 export type TransformationType = (typeof TRANSFORMATION_TYPES)[number];
 
 export const llmParamsSchema = z

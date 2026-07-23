@@ -59,6 +59,6 @@ describe("parseParams", () => {
   });
 });
 
-it("exposes the three transform types", () => {
-  expect(TRANSFORMATION_TYPES).toEqual(["score", "summarize", "classify"]);
+it("exposes the transform types", () => {
+  expect(TRANSFORMATION_TYPES).toEqual(["score", "summarize", "classify", "knowledge"]);
 });

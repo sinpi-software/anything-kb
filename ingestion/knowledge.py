@@ -60,8 +60,9 @@ def _chat(
     llm_params: dict[str, Any],
     response_format: dict[str, Any] | None = None,
 ) -> str | None:
-    # Every LLM call goes through here, so the concurrency gate can't be forgotten.
-    kwargs: dict[str, Any] = {"model": model, "messages": messages, **llm_params}
+    # Every LLM call goes through here, so the concurrency gate and request timeout
+    # can't be forgotten (an untimed reasoning-model call can hang the flow run forever).
+    kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout_ms": config.LLM_TIMEOUT_MS, **llm_params}
     if response_format is not None:
         kwargs["response_format"] = response_format
     with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):

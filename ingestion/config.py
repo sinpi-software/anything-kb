@@ -32,6 +32,9 @@ ARTICLE_FETCH_RETRY_DELAY_SECONDS = 5
 
 # --- LLM ---
 OPENROUTER_API_KEY_ENV = "INGESTION_OPENROUTER_API_KEY"
+# Per-request timeout. Without it a slow/stuck model response (e.g. a reasoning model
+# thinking indefinitely) hangs the transform — and its flow run — forever.
+LLM_TIMEOUT_MS = 90_000
 
 # --- Neo4j ---
 NEO4J_URI_ENV = "INGESTION_NEO4J_URI"

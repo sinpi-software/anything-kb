@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFetcher, type SubmitTarget } from "react-router";
 import { toast } from "sonner";
 import { Trash2, Plus } from "lucide-react";
 import type { Route } from "./+types/desk.transformations";
 import { listTransformations, type TransformationRow } from "~/services/transformations.server";
-import { TRANSFORMATION_TYPES, parseParams, transformationInputSchema } from "~/schemas/transformation";
+import {
+  TRANSFORMATION_TYPES,
+  parseParams,
+  transformationInputSchema,
+  type TransformationInput,
+} from "~/schemas/transformation";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -32,7 +37,7 @@ function toDraft(row: TransformationRow): Draft {
   };
 }
 
-function buildPayload(draft: Draft): { ok: true; value: object } | { ok: false; error: string } {
+function buildPayload(draft: Draft): { ok: true; value: TransformationInput } | { ok: false; error: string } {
   const paramsResult = parseParams(draft.params.extraJson);
   if (!paramsResult.ok) return { ok: false, error: paramsResult.error };
   const known: Record<string, number> = {};
@@ -51,13 +56,29 @@ function buildPayload(draft: Draft): { ok: true; value: object } | { ok: false; 
     params: Object.keys(params).length ? params : null,
   };
   const parsed = transformationInputSchema.safeParse(candidate);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const message = issue?.path.length ? `${issue.path.join(".")}: ${issue.message}` : (issue?.message ?? "Invalid input");
+    return { ok: false, error: message };
+  }
   return { ok: true, value: parsed.data };
+}
+
+function fetcherFailed(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const { error, errors } = data as { error?: unknown; errors?: unknown };
+  return Boolean(error || errors);
 }
 
 export default function TransformationsPage({ loaderData }: Route.ComponentProps) {
   const { orgId, transformations } = loaderData;
   const addFetcher = useFetcher();
+
+  useEffect(() => {
+    if (addFetcher.state === "idle" && fetcherFailed(addFetcher.data)) {
+      toast.error("Couldn't add — try again");
+    }
+  }, [addFetcher.state, addFetcher.data]);
 
   function add() {
     addFetcher.submit(
@@ -70,7 +91,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
     <main className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Transformations</h1>
-        <Button onClick={add}><Plus className="mr-1 size-4" /> Add</Button>
+        <Button onClick={add} disabled={addFetcher.state !== "idle"}><Plus className="mr-1 size-4" /> Add</Button>
       </div>
       <Table>
         <TableHeader>
@@ -98,13 +119,19 @@ function EditableRow({ row }: { row: TransformationRow }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(row));
   const [confirming, setConfirming] = useState(false);
 
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcherFailed(fetcher.data)) {
+      toast.error("Couldn't save — try again");
+    }
+  }, [fetcher.state, fetcher.data]);
+
   function save(next: Draft) {
     const payload = buildPayload(next);
     if (!payload.ok) {
       toast.error(payload.error);
       return;
     }
-    fetcher.submit(payload.value as unknown as SubmitTarget, {
+    fetcher.submit(payload.value as SubmitTarget, {
       method: "PATCH",
       action: `/api/transformations/${row.id}`,
       encType: "application/json",

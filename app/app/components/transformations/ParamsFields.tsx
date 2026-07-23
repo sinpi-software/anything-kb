@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Field } from "@base-ui/react/field";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -34,14 +35,15 @@ export function ParamsFields({
   value: ParamsFieldsValue;
   onChange: (next: ParamsFieldsValue) => void;
 }) {
+  const uid = useId();
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
         {KNOWN_KEYS.map((key) => (
           <Field.Root key={key} className="flex flex-col gap-1">
-            <Label htmlFor={`param-${key}`} className="text-xs text-muted-foreground">{key}</Label>
+            <Label htmlFor={`${uid}-${key}`} className="text-xs text-muted-foreground">{key}</Label>
             <Input
-              id={`param-${key}`}
+              id={`${uid}-${key}`}
               inputMode="decimal"
               value={value.known[key]}
               onChange={(e) => onChange({ ...value, known: { ...value.known, [key]: e.target.value } })}
@@ -50,9 +52,9 @@ export function ParamsFields({
         ))}
       </div>
       <Field.Root className="flex flex-col gap-1">
-        <Label htmlFor="param-extra" className="text-xs text-muted-foreground">extra (JSON)</Label>
+        <Label htmlFor={`${uid}-extra`} className="text-xs text-muted-foreground">extra (JSON)</Label>
         <Textarea
-          id="param-extra"
+          id={`${uid}-extra`}
           rows={2}
           placeholder='{"seed": 42}'
           value={value.extraJson}

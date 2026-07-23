@@ -199,16 +199,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-temperature"
-                      id="base-ui-_r_7_"
+                      for="_r_6_-temperature"
+                      id="base-ui-_r_8_"
                     >
                       temperature
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_7_"
+                      aria-labelledby="base-ui-_r_8_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-temperature"
+                      id="_r_6_-temperature"
                       inputmode="decimal"
                       value=""
                     />
@@ -219,16 +219,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-top_p"
-                      id="base-ui-_r_a_"
+                      for="_r_6_-top_p"
+                      id="base-ui-_r_b_"
                     >
                       top_p
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_a_"
+                      aria-labelledby="base-ui-_r_b_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-top_p"
+                      id="_r_6_-top_p"
                       inputmode="decimal"
                       value=""
                     />
@@ -239,16 +239,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-top_k"
-                      id="base-ui-_r_d_"
+                      for="_r_6_-top_k"
+                      id="base-ui-_r_e_"
                     >
                       top_k
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_d_"
+                      aria-labelledby="base-ui-_r_e_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-top_k"
+                      id="_r_6_-top_k"
                       inputmode="decimal"
                       value=""
                     />
@@ -259,16 +259,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-max_tokens"
-                      id="base-ui-_r_g_"
+                      for="_r_6_-max_tokens"
+                      id="base-ui-_r_h_"
                     >
                       max_tokens
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_g_"
+                      aria-labelledby="base-ui-_r_h_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-max_tokens"
+                      id="_r_6_-max_tokens"
                       inputmode="decimal"
                       value=""
                     />
@@ -280,15 +280,15 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                   <label
                     class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                     data-slot="label"
-                    for="param-extra"
-                    id="base-ui-_r_j_"
+                    for="_r_6_-extra"
+                    id="base-ui-_r_k_"
                   >
                     extra (JSON)
                   </label>
                   <textarea
                     class="border-input placeholder:text-muted-foreground dark:bg-input/30 flex field-sizing-content min-h-16 w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                     data-slot="textarea"
-                    id="param-extra"
+                    id="_r_6_-extra"
                     placeholder="{"seed": 42}"
                     rows="2"
                   />
@@ -364,7 +364,7 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                 aria-haspopup="listbox"
                 class="border-input data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex h-8 w-full items-center justify-between gap-2 rounded-lg border bg-transparent px-2.5 py-1 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
                 data-slot="select-trigger"
-                id="base-ui-_r_l_"
+                id="base-ui-_r_m_"
                 role="combobox"
                 tabindex="0"
                 type="button"
@@ -400,7 +400,7 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
               </button>
               <input
                 aria-hidden="true"
-                id="base-ui-_r_l_-hidden-input"
+                id="base-ui-_r_m_-hidden-input"
                 style="clip-path: inset(50%); overflow: hidden; white-space: nowrap; border: 0px; padding: 0px; width: 1px; height: 1px; margin: -1px; position: fixed; top: 0px; left: 0px;"
                 tabindex="-1"
                 value="score"
@@ -413,7 +413,7 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
               <input
                 class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                 data-slot="input"
-                id="base-ui-_r_o_"
+                id="base-ui-_r_p_"
                 placeholder="openai/gpt-4o"
                 value="openai/gpt-4o"
               />
@@ -446,16 +446,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-temperature"
-                      id="base-ui-_r_q_"
+                      for="_r_q_-temperature"
+                      id="base-ui-_r_s_"
                     >
                       temperature
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_q_"
+                      aria-labelledby="base-ui-_r_s_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-temperature"
+                      id="_r_q_-temperature"
                       inputmode="decimal"
                       value=""
                     />
@@ -466,16 +466,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-top_p"
-                      id="base-ui-_r_t_"
+                      for="_r_q_-top_p"
+                      id="base-ui-_r_v_"
                     >
                       top_p
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_t_"
+                      aria-labelledby="base-ui-_r_v_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-top_p"
+                      id="_r_q_-top_p"
                       inputmode="decimal"
                       value=""
                     />
@@ -486,16 +486,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-top_k"
-                      id="base-ui-_r_10_"
+                      for="_r_q_-top_k"
+                      id="base-ui-_r_12_"
                     >
                       top_k
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_10_"
+                      aria-labelledby="base-ui-_r_12_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-top_k"
+                      id="_r_q_-top_k"
                       inputmode="decimal"
                       value=""
                     />
@@ -506,16 +506,16 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                     <label
                       class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                       data-slot="label"
-                      for="param-max_tokens"
-                      id="base-ui-_r_13_"
+                      for="_r_q_-max_tokens"
+                      id="base-ui-_r_15_"
                     >
                       max_tokens
                     </label>
                     <input
-                      aria-labelledby="base-ui-_r_13_"
+                      aria-labelledby="base-ui-_r_15_"
                       class="border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 flex h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                       data-slot="input"
-                      id="param-max_tokens"
+                      id="_r_q_-max_tokens"
                       inputmode="decimal"
                       value=""
                     />
@@ -527,15 +527,15 @@ exports[`TransformationsPage > renders the transform chain table 1`] = `
                   <label
                     class="flex items-center gap-2 font-medium select-none group-data-[disabled]:pointer-events-none group-data-[disabled]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 text-xs text-muted-foreground"
                     data-slot="label"
-                    for="param-extra"
-                    id="base-ui-_r_16_"
+                    for="_r_q_-extra"
+                    id="base-ui-_r_18_"
                   >
                     extra (JSON)
                   </label>
                   <textarea
                     class="border-input placeholder:text-muted-foreground dark:bg-input/30 flex field-sizing-content min-h-16 w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
                     data-slot="textarea"
-                    id="param-extra"
+                    id="_r_q_-extra"
                     placeholder="{"seed": 42}"
                     rows="2"
                   />

@@ -147,7 +147,9 @@ class Artifact(_BaseModel):
 
 class Transformation(_AuthoredModel):
     __tablename__ = "transformations"
-    __table_args__ = (UniqueConstraint("org_id", "position"),)
+    # Deferred so reordering can rewrite positions within a txn without tripping the
+    # unique check mid-update; Postgres validates once at COMMIT.
+    __table_args__ = (UniqueConstraint("org_id", "position", deferrable=True, initially="DEFERRED"),)
     org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
     org: Mapped["Org"] = relationship("Org", backref="transformations")
     position: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))

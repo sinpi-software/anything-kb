@@ -1,8 +1,8 @@
 """dev
 
-Revision ID: 38c497f97185
+Revision ID: e76651196869
 Revises: 
-Create Date: 2026-07-22 17:35:15.818685
+Create Date: 2026-07-22 22:19:23.301637
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '38c497f97185'
+revision: str = 'e76651196869'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -27,11 +27,11 @@ def upgrade() -> None:
     sa.Column('email_verified', sa.BOOLEAN(), server_default=sa.text('false'), nullable=False),
     sa.Column('password_hash', sa.TEXT(), nullable=False),
     sa.Column('is_admin', sa.BOOLEAN(), server_default=sa.text('false'), nullable=False),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
@@ -40,17 +40,30 @@ def upgrade() -> None:
     op.create_table('app_settings',
     sa.Column('setting_name', sa.TEXT(), nullable=False),
     sa.Column('setting_value', sa.TEXT(), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('setting_name')
     )
+    op.create_table('orgs',
+    sa.Column('name', sa.TEXT(), nullable=False),
+    sa.Column('charter', sa.TEXT(), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('artifacts',
+    sa.Column('org_id', sa.UUID(), nullable=True),
     sa.Column('ref_table_name', sa.String(), nullable=False),
     sa.Column('ref_table_id', sa.UUID(), nullable=False),
     sa.Column('type', sa.TEXT(), nullable=False),
@@ -58,34 +71,19 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
-    sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_artifacts_type', 'artifacts', ['type'], unique=False)
-    op.create_table('orgs',
-    sa.Column('name', sa.TEXT(), nullable=False),
-    sa.Column('charter', sa.TEXT(), nullable=True),
-    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
-    sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('org_settings',
     sa.Column('org_id', sa.UUID(), nullable=False),
     sa.Column('setting_name', sa.TEXT(), nullable=False),
     sa.Column('setting_value', sa.TEXT(), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
@@ -96,11 +94,11 @@ def upgrade() -> None:
     sa.Column('org_id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('role', sa.TEXT(), nullable=False),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
@@ -113,11 +111,11 @@ def upgrade() -> None:
     sa.Column('title', sa.TEXT(), nullable=True),
     sa.Column('last_fetched_at', postgresql.TIMESTAMP(), nullable=True),
     sa.Column('active', sa.BOOLEAN(), server_default=sa.text('false'), nullable=False),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
@@ -125,29 +123,31 @@ def upgrade() -> None:
     )
     op.create_table('transformations',
     sa.Column('org_id', sa.UUID(), nullable=False),
+    sa.Column('position', sa.Integer(), server_default=sa.text('0'), nullable=False),
     sa.Column('type', sa.TEXT(), nullable=False),
     sa.Column('model', sa.TEXT(), nullable=True),
     sa.Column('prompt', sa.TEXT(), nullable=False),
     sa.Column('params', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('org_id', 'position', deferrable=True, initially='DEFERRED')
     )
     op.create_table('wiki_pages',
     sa.Column('org_id', sa.UUID(), nullable=False),
     sa.Column('title', sa.TEXT(), nullable=False),
     sa.Column('content', sa.TEXT(), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
@@ -159,26 +159,37 @@ def upgrade() -> None:
     sa.Column('title', sa.TEXT(), nullable=False),
     sa.Column('link', sa.TEXT(), nullable=False),
     sa.Column('content', sa.TEXT(), nullable=True),
+    sa.Column('status', sa.TEXT(), server_default='pending', nullable=False),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
-    sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['feed_id'], ['rss_feeds.id'], ),
-    sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('feed_id', 'dedup_key')
+    )
+    op.create_table('transform_runs',
+    sa.Column('transformation_id', sa.UUID(), nullable=False),
+    sa.Column('input_artifact_id', sa.UUID(), nullable=False),
+    sa.Column('output_artifact_id', sa.UUID(), nullable=True),
+    sa.Column('status', sa.TEXT(), server_default='pending', nullable=False),
+    sa.Column('error_message', sa.TEXT(), nullable=True),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['input_artifact_id'], ['artifacts.id'], ),
+    sa.ForeignKeyConstraint(['output_artifact_id'], ['artifacts.id'], ),
+    sa.ForeignKeyConstraint(['transformation_id'], ['transformations.id'], ),
+    sa.PrimaryKeyConstraint('id')
     )
     op.create_table('wiki_page_versions',
     sa.Column('page_id', sa.UUID(), nullable=False),
     sa.Column('version_number', sa.Integer(), nullable=False),
     sa.Column('content', sa.TEXT(), nullable=True),
+    sa.Column('created_by_id', sa.UUID(), nullable=True),
+    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('created_by_id', sa.UUID(), nullable=True),
-    sa.Column('updated_by_id', sa.UUID(), nullable=True),
     sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['page_id'], ['wiki_pages.id'], ),
     sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ),
@@ -192,15 +203,16 @@ def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_table('wiki_page_versions')
+    op.drop_table('transform_runs')
     op.drop_table('rss_feed_items')
     op.drop_table('wiki_pages')
     op.drop_table('transformations')
     op.drop_table('rss_feeds')
     op.drop_table('org_users')
     op.drop_table('org_settings')
-    op.drop_table('orgs')
     op.drop_index('ix_artifacts_type', table_name='artifacts')
     op.drop_table('artifacts')
+    op.drop_table('orgs')
     op.drop_table('app_settings')
     op.drop_table('users')
     # ### end Alembic commands ###

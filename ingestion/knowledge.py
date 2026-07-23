@@ -1,7 +1,11 @@
+import re
 from typing import Any
 
+from neo4j import Session
 from openrouter import OpenRouter
 from pydantic import BaseModel
+
+import config
 
 
 class ExtractedEntity(BaseModel):
@@ -62,3 +66,67 @@ def extract_knowledge(
     if not isinstance(content, str):
         raise ValueError("LLM returned no text content")
     return KnowledgeExtraction.model_validate_json(content)
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"\s+", " ", name).strip().lower()
+
+
+def candidate_query(org_id: str, entity_type: str, name_normalized: str, limit: int) -> tuple[str, dict[str, Any]]:
+    # Exact/alias match within the org + type; scoped by org_id.
+    query = (
+        "MATCH (e:Entity {org_id: $org_id, type: $type}) "
+        "WHERE e.name_normalized = $name_normalized OR $name_normalized IN e.aliases "
+        "RETURN e.id AS id, e.name AS name, e.summary AS summary "
+        "LIMIT $limit"
+    )
+    params: dict[str, Any] = {
+        "org_id": org_id,
+        "type": entity_type,
+        "name_normalized": name_normalized,
+        "limit": limit,
+    }
+    return query, params
+
+
+def build_resolution_messages(entity: ExtractedEntity, candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
+    listed = "\n".join(f'- id={c["id"]}: {c["name"]} — {c["summary"]}' for c in candidates)
+    system = (
+        "You resolve whether a newly mentioned entity is the SAME as one of the existing "
+        "entities. Reply with ONLY the matching id, or the word NEW if none match."
+    )
+    user = (
+        f"New entity: {entity.name} ({entity.type}) — {entity.description}\n\n"
+        f"Existing candidates:\n{listed}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def resolve_entity(
+    session: Session,
+    client: OpenRouter,
+    model: str,
+    org_id: str,
+    entity: ExtractedEntity,
+    llm_params: dict[str, Any],
+) -> str | None:
+    query, params = candidate_query(
+        org_id, entity.type, normalize_name(entity.name), config.KNOWLEDGE_RESOLUTION_CANDIDATES
+    )
+    candidates = [dict(record) for record in session.run(query, params)]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return str(candidates[0]["id"])
+    # Same plain str-keyed dict shape as extract_knowledge above; mypy resolves this call
+    # (no response_format kwarg) to a single overload and flags the messages arg directly,
+    # rather than the ambiguous-overload error extract_knowledge triggers.
+    result = client.chat.send(
+        model=model,
+        messages=build_resolution_messages(entity, candidates),  # type: ignore[arg-type]
+        **llm_params,
+    )
+    content = result.choices[0].message.content
+    answer = content.strip() if isinstance(content, str) else "NEW"
+    valid_ids = {str(c["id"]) for c in candidates}
+    return answer if answer in valid_ids else None

@@ -13,6 +13,8 @@ from knowledge import (  # noqa: E402
     ExtractedEntity,
     KnowledgeExtraction,
     build_extraction_messages,
+    candidate_query,
+    normalize_name,
 )
 from neo4j_client import bootstrap_schema, get_neo4j_session  # noqa: E402
 
@@ -63,3 +65,16 @@ def test_build_extraction_messages_includes_entity_types_and_text() -> None:
     assert "Some article" in joined
     assert msgs[0]["role"] == "system"
     assert msgs[-1]["role"] == "user"
+
+
+def test_normalize_name() -> None:
+    assert normalize_name("  Barack   Obama ") == "barack obama"
+
+
+def test_candidate_query_is_org_and_type_scoped() -> None:
+    query, params = candidate_query("org-1", "Person", "ada lovelace", 5)
+    assert "org_id" in query
+    assert params["org_id"] == "org-1"
+    assert params["type"] == "Person"
+    assert params["name_normalized"] == "ada lovelace"
+    assert params["limit"] == 5

@@ -122,6 +122,16 @@ def test_escape_lucene_escapes_special_characters() -> None:
     assert escape_lucene('(quoted "phrase")') == '\\(quoted \\"phrase\\"\\)'
 
 
+def test_strict_schema_closes_objects_and_requires_all_keys() -> None:
+    schema = knowledge_mod._strict_schema(KnowledgeExtraction.model_json_schema())
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"entities", "relationships"}
+    entity = schema["$defs"]["ExtractedEntity"]
+    assert entity["additionalProperties"] is False
+    assert set(entity["required"]) == {"name", "type", "description", "aliases"}
+    assert "default" not in entity["properties"]["aliases"]
+
+
 class _FakeMessage:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -259,9 +269,9 @@ def test_upsert_and_relationship_roundtrip() -> None:
             assert count == 2  # no duplicate
             summ = session.run("MATCH (e:Entity {id: $id}) RETURN e.summary AS s", {"id": a_id}).single(True)["s"]
             assert summ == "sum A v2"
-            rels = session.run(
-                "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": org}
-            ).single(True)["t"]
+            rels = session.run("MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": org}).single(
+                True
+            )["t"]
             assert rels == "WORKED_ON"
     finally:
         _cleanup(org)
@@ -276,9 +286,7 @@ def test_org_isolation() -> None:
             ada = ExtractedEntity(name="Ada", type="Person", description="d")
             upsert_entity(session, org_a, str(uuid.uuid4()), ada, "A")
             upsert_entity(session, org_b, str(uuid.uuid4()), ada, "B")
-            a_count = session.run(
-                "MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_a}
-            ).single(True)["c"]
+            a_count = session.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_a}).single(True)["c"]
             assert a_count == 1  # org_b's identically-named entity is invisible to org_a
     finally:
         _cleanup(org_a)
@@ -399,9 +407,9 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
         output_artifact_id = knowledge_mod.run_knowledge_transform(artifact_id, transformation_id)
 
         with get_neo4j_session() as neo:
-            entity_count = neo.run(
-                "MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_id_str}
-            ).single(True)["c"]
+            entity_count = neo.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_id_str}).single(
+                True
+            )["c"]
             assert entity_count == 2  # the off-list-type "Rover" entity was filtered, not written
             rel_count = neo.run(
                 "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN count(r) AS c", {"o": org_id_str}

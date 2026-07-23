@@ -78,6 +78,22 @@ def build_extraction_messages(prompt: str, entity_types: list[str], text: str) -
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
 
+def _strict_schema(node: Any) -> Any:
+    # OpenAI structured outputs require additionalProperties:false and every key required
+    # on each object; pydantic's model_json_schema() emits neither.
+    if isinstance(node, dict):
+        node.pop("default", None)
+        if node.get("type") == "object" and node.get("properties"):
+            node["additionalProperties"] = False
+            node["required"] = list(node["properties"])
+        for value in node.values():
+            _strict_schema(value)
+    elif isinstance(node, list):
+        for value in node:
+            _strict_schema(value)
+    return node
+
+
 def extract_knowledge(
     client: OpenRouter,
     model: str,
@@ -88,7 +104,11 @@ def extract_knowledge(
 ) -> KnowledgeExtraction:
     schema = {
         "type": "json_schema",
-        "json_schema": {"name": "knowledge", "schema": KnowledgeExtraction.model_json_schema()},
+        "json_schema": {
+            "name": "knowledge",
+            "strict": True,
+            "schema": _strict_schema(KnowledgeExtraction.model_json_schema()),
+        },
     }
     content = _chat(client, model, build_extraction_messages(prompt, entity_types, text), llm_params, schema)
     if content is None:

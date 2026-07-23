@@ -130,3 +130,69 @@ def resolve_entity(
     answer = content.strip() if isinstance(content, str) else "NEW"
     valid_ids = {str(c["id"]) for c in candidates}
     return answer if answer in valid_ids else None
+
+
+def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_params: dict[str, Any]) -> str:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You maintain an encyclopedia entry. Merge the new information into the existing "
+                "summary, keeping it accurate and concise. Return only the revised summary."
+            ),
+        },
+        {"role": "user", "content": f"Existing summary:\n{existing}\n\nNew information:\n{new}"},
+    ]
+    # Same plain str-keyed dict shape as resolve_entity above; mypy resolves this call
+    # (no response_format kwarg) to a single overload and flags the messages arg directly.
+    result = client.chat.send(
+        model=model,
+        messages=messages,  # type: ignore[arg-type]
+        **llm_params,
+    )
+    content = result.choices[0].message.content
+    return content.strip() if isinstance(content, str) else existing
+
+
+def upsert_entity(session: Session, org_id: str, entity_id: str, entity: ExtractedEntity, summary: str) -> None:
+    session.run(
+        "MERGE (e:Entity {id: $id}) "
+        "ON CREATE SET e.org_id = $org_id, e.type = $type, e.created_at = datetime() "
+        "SET e.name = $name, e.name_normalized = $nn, e.summary = $summary, "
+        "e.aliases = $aliases, e.updated_at = datetime()",
+        {
+            "id": entity_id,
+            "org_id": org_id,
+            "type": entity.type,
+            "name": entity.name,
+            "nn": normalize_name(entity.name),
+            "summary": summary,
+            "aliases": [normalize_name(a) for a in entity.aliases],
+        },
+    )
+
+
+def write_relationship(
+    session: Session, org_id: str, source_id: str, target_id: str, rel_type: str, artifact_id: str
+) -> None:
+    session.run(
+        "MATCH (a:Entity {id: $source_id, org_id: $org_id}), (b:Entity {id: $target_id, org_id: $org_id}) "
+        "MERGE (a)-[r:RELATED {type: $rel_type, org_id: $org_id}]->(b) "
+        "ON CREATE SET r.source_artifact_id = $artifact_id, r.created_at = datetime()",
+        {
+            "source_id": source_id,
+            "target_id": target_id,
+            "org_id": org_id,
+            "rel_type": rel_type,
+            "artifact_id": artifact_id,
+        },
+    )
+
+
+def write_provenance(session: Session, org_id: str, entity_id: str, artifact_id: str) -> None:
+    session.run(
+        "MERGE (s:Source {org_id: $org_id, artifact_id: $artifact_id}) "
+        "WITH s MATCH (e:Entity {id: $entity_id, org_id: $org_id}) "
+        "MERGE (e)-[:MENTIONED_IN]->(s)",
+        {"org_id": org_id, "artifact_id": artifact_id, "entity_id": entity_id},
+    )

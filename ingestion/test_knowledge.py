@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import pytest
 
@@ -15,6 +16,9 @@ from knowledge import (  # noqa: E402
     build_extraction_messages,
     candidate_query,
     normalize_name,
+    upsert_entity,
+    write_provenance,
+    write_relationship,
 )
 from neo4j_client import bootstrap_schema, get_neo4j_session  # noqa: E402
 
@@ -78,3 +82,52 @@ def test_candidate_query_is_org_and_type_scoped() -> None:
     assert params["type"] == "Person"
     assert params["name_normalized"] == "ada lovelace"
     assert params["limit"] == 5
+
+
+def _cleanup(org_id: str) -> None:
+    with get_neo4j_session() as session:
+        session.run("MATCH (n) WHERE n.org_id = $org_id DETACH DELETE n", {"org_id": org_id})
+
+
+@requires_neo4j
+def test_upsert_and_relationship_roundtrip() -> None:
+    bootstrap_schema()
+    org = f"test-{uuid.uuid4()}"
+    a_id, b_id = str(uuid.uuid4()), str(uuid.uuid4())
+    try:
+        with get_neo4j_session() as session:
+            upsert_entity(session, org, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A")
+            upsert_entity(session, org, b_id, ExtractedEntity(name="Engine", type="Thing", description="d"), "sum B")
+            # Re-upsert A with a new summary — must update, not duplicate.
+            upsert_entity(session, org, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A v2")
+            write_relationship(session, org, a_id, b_id, "WORKED_ON", "art-1")
+            write_provenance(session, org, a_id, "art-1")
+
+            count = session.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org}).single(True)["c"]
+            assert count == 2  # no duplicate
+            summ = session.run("MATCH (e:Entity {id: $id}) RETURN e.summary AS s", {"id": a_id}).single(True)["s"]
+            assert summ == "sum A v2"
+            rels = session.run(
+                "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": org}
+            ).single(True)["t"]
+            assert rels == "WORKED_ON"
+    finally:
+        _cleanup(org)
+
+
+@requires_neo4j
+def test_org_isolation() -> None:
+    bootstrap_schema()
+    org_a, org_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    try:
+        with get_neo4j_session() as session:
+            ada = ExtractedEntity(name="Ada", type="Person", description="d")
+            upsert_entity(session, org_a, str(uuid.uuid4()), ada, "A")
+            upsert_entity(session, org_b, str(uuid.uuid4()), ada, "B")
+            a_count = session.run(
+                "MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_a}
+            ).single(True)["c"]
+            assert a_count == 1  # org_b's identically-named entity is invisible to org_a
+    finally:
+        _cleanup(org_a)
+        _cleanup(org_b)

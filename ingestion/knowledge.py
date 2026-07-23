@@ -1,11 +1,17 @@
+import os
 import re
+import uuid
 from typing import Any
 
 from neo4j import Session
 from openrouter import OpenRouter
+from prefect.concurrency.sync import concurrency
 from pydantic import BaseModel
 
 import config
+from db import get_postgres_session
+from models import Artifact, Transformation
+from neo4j_client import get_neo4j_session
 
 
 class ExtractedEntity(BaseModel):
@@ -196,3 +202,88 @@ def write_provenance(session: Session, org_id: str, entity_id: str, artifact_id:
         "MERGE (e)-[:MENTIONED_IN]->(s)",
         {"org_id": org_id, "artifact_id": artifact_id, "entity_id": entity_id},
     )
+
+
+class KnowledgeTransformOutput(BaseModel):
+    entities_created: int
+    entities_merged: int
+    relationships_created: int
+    source_artifact_id: str
+
+    def to_model(self) -> tuple[str, str]:
+        return self.model_dump_json(), "application/json"
+
+
+def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
+    with get_postgres_session() as session:
+        transformation = session.get(Transformation, transformation_id)
+        if transformation is None:
+            raise ValueError(f"Transformation {transformation_id} not found")
+        model = transformation.model
+        prompt = transformation.prompt
+        params = dict(transformation.params or {})
+        entity_types = params.pop("entity_types", [])
+        llm_params = params  # remaining keys are LLM knobs (temperature, etc.)
+
+        artifact = session.get(Artifact, artifact_id)
+        if artifact is None:
+            raise ValueError(f"Artifact {artifact_id} not found")
+        if artifact.org_id is None:
+            raise ValueError(f"Artifact {artifact_id} has no org")
+        # SQLAlchemy's UUID(as_uuid=True) columns hand back uuid.UUID objects, not str
+        # (despite the Mapped[str] annotation). Neo4j's driver rejects raw UUID objects
+        # as query parameters, so every id is coerced to str before it touches the graph.
+        org_id = str(artifact.org_id)
+        text = artifact.data
+
+    created = merged = rels = 0
+    with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client:
+        with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
+            extraction = extract_knowledge(client, model, prompt, entity_types, text, llm_params)
+
+        name_to_id: dict[str, str] = {}
+        with get_neo4j_session() as neo:
+            for entity in extraction.entities:
+                existing_id = resolve_entity(neo, client, model, org_id, entity, llm_params)
+                if existing_id is None:
+                    entity_id = str(uuid.uuid4())
+                    summary = entity.description
+                    created += 1
+                else:
+                    entity_id = existing_id
+                    record = neo.run(
+                        "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
+                        {"id": entity_id, "org_id": org_id},
+                    ).single()
+                    existing_summary = record["s"] if record else ""
+                    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
+                        summary = merge_summary(client, model, existing_summary, entity.description, llm_params)
+                    merged += 1
+                upsert_entity(neo, org_id, entity_id, entity, summary)
+                write_provenance(neo, org_id, entity_id, artifact_id)
+                name_to_id[normalize_name(entity.name)] = entity_id
+
+            for rel in extraction.relationships:
+                source_id = name_to_id.get(normalize_name(rel.source_name))
+                target_id = name_to_id.get(normalize_name(rel.target_name))
+                if source_id and target_id:
+                    write_relationship(neo, org_id, source_id, target_id, rel.type, artifact_id)
+                    rels += 1
+
+    output = KnowledgeTransformOutput(
+        entities_created=created, entities_merged=merged, relationships_created=rels, source_artifact_id=artifact_id
+    )
+    data, content_type = output.to_model()
+    with get_postgres_session() as session:
+        out = Artifact(
+            org_id=org_id,
+            ref_table_name=Artifact.__tablename__,
+            ref_table_id=artifact_id,
+            type=content_type,
+            data=data,
+        )
+        session.add(out)
+        session.flush()
+        out_id = out.id
+        session.commit()
+    return out_id

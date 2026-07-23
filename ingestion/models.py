@@ -39,6 +39,7 @@ class TransformationType(Enum):
     SCORE = "score"
     SUMMARIZE = "summarize"
     CLASSIFY = "classify"
+    KNOWLEDGE = "knowledge"
 
 
 class TransformRunStatus(Enum):

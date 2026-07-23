@@ -120,11 +120,19 @@ def llm_classify_transform(artifact_id: str, transformation_id: str) -> str:
     return _run_llm_transform(artifact_id, transformation_id, LLMClassifyTransformOutput, "classify")
 
 
+@task
+def llm_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
+    from knowledge import run_knowledge_transform
+
+    return run_knowledge_transform(artifact_id, transformation_id)
+
+
 # Maps a transformation's `type` to the task that runs it.
 DISPATCH: dict[str, Callable[[str, str], str]] = {
     TransformationType.SCORE.value: llm_score_transform,
     TransformationType.SUMMARIZE.value: llm_summarize_transform,
     TransformationType.CLASSIFY.value: llm_classify_transform,
+    TransformationType.KNOWLEDGE.value: llm_knowledge_transform,
 }
 
 
@@ -138,6 +146,10 @@ def validate_transform_config(
         raise ValueError(f"{transform_type} transform requires a model")
     if not prompt:
         raise ValueError(f"{transform_type} transform requires a prompt")
+    if transform_type == TransformationType.KNOWLEDGE.value:
+        entity_types = (params or {}).get("entity_types")
+        if not isinstance(entity_types, list) or not entity_types:
+            raise ValueError("knowledge transform requires a non-empty params['entity_types'] list")
     LLMParams.model_validate(params or {})
 
 

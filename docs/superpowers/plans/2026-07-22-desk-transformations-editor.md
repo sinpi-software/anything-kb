@@ -709,7 +709,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   return { orgId, transformations: await listTransformations(orgId) };
 }
 
-export default function TransformationsРage({ loaderData }: Route.ComponentProps) {
+export default function TransformationsPage({ loaderData }: Route.ComponentProps) {
   const { transformations } = loaderData;
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
@@ -738,7 +738,6 @@ export default function TransformationsРage({ loaderData }: Route.ComponentProp
   );
 }
 ```
-Rename the component to `TransformationsPage` (the placeholder Cyrillic char above is intentional to force you to type it — use plain ASCII `TransformationsPage`).
 
 - [ ] **Step 7: Write the snapshot test**
 

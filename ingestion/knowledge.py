@@ -74,6 +74,8 @@ def _chat(
 def build_extraction_messages(prompt: str, entity_types: list[str], text: str) -> list[dict[str, str]]:
     system = (
         f"{prompt}\n\nExtract only entities of these types: {', '.join(entity_types)}. "
+        "For each entity, write a thorough, self-contained description capturing everything this "
+        "article says about it (who/what it is, key facts, context) — a rich paragraph, not a label. "
         "Also extract relationships between them, each with a concise UPPER_SNAKE_CASE type."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
@@ -217,10 +219,12 @@ def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_p
     messages = [
         {
             "role": "system",
-            "content": "Merge the new info into the existing summary; keep it accurate and concise. "
-            "Return only the summary.",
+            "content": "You maintain an encyclopedia article about an entity. Integrate the new "
+            "information into the existing article, growing it into a comprehensive, well-organized "
+            "entry (use multiple paragraphs/sections as the material warrants). Keep all existing "
+            "facts, add the new ones, and note any contradictions. Return only the article text.",
         },
-        {"role": "user", "content": f"Existing:\n{existing}\n\nNew:\n{new}"},
+        {"role": "user", "content": f"Existing article:\n{existing}\n\nNew source:\n{new}"},
     ]
     return (_chat(client, model, messages, llm_params) or existing).strip()
 

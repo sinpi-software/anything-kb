@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFetcher, type SubmitTarget } from "react-router";
 import { useForm } from "@tanstack/react-form";
 import { toast } from "sonner";
-import { Trash2, Plus, GripVertical } from "lucide-react";
+import { Trash2, Plus, GripVertical, ChevronRight, ChevronDown } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -142,9 +142,8 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
                 <TableHead className="w-8" />
                 <TableHead className="w-12">#</TableHead>
                 <TableHead className="w-40">Type</TableHead>
-                <TableHead className="w-56">Model</TableHead>
-                <TableHead>Prompt</TableHead>
-                <TableHead>Params</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead className="w-8" />
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
@@ -169,6 +168,7 @@ function EditableRow({ row }: { row: TransformationRow }) {
   const sortable = useSortable({ id: row.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
   const [confirming, setConfirming] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const defaultValues = useMemo(() => toDraft(row), [row]);
@@ -203,74 +203,97 @@ function EditableRow({ row }: { row: TransformationRow }) {
   const debounced = { onChangeDebounceMs: DEBOUNCED_AUTOSAVE_MS, onChange: () => form.handleSubmit() };
 
   return (
-    <TableRow ref={sortable.setNodeRef} style={style}>
-      <TableCell>
-        <button
-          type="button"
-          className="cursor-grab text-muted-foreground"
-          {...sortable.attributes}
-          {...sortable.listeners}
-          aria-label="Drag to reorder"
-        >
-          <GripVertical className="size-4" />
-        </button>
-      </TableCell>
-      <TableCell>{row.position}</TableCell>
-      <TableCell>
-        <form.Field name="type" listeners={{ onChange: () => form.handleSubmit() }}>
-          {(field) => (
-            <Select
-              value={field.state.value}
-              onValueChange={(type) => {
-                if (!type) return;
-                field.handleChange(type as Draft["type"]);
-              }}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {TRANSFORMATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
+    <>
+      <TableRow ref={sortable.setNodeRef} style={style}>
+        <TableCell>
+          <button
+            type="button"
+            className="cursor-grab text-muted-foreground"
+            {...sortable.attributes}
+            {...sortable.listeners}
+            aria-label="Drag to reorder"
+          >
+            <GripVertical className="size-4" />
+          </button>
+        </TableCell>
+        <TableCell>{row.position}</TableCell>
+        <TableCell>
+          <form.Field name="type" listeners={{ onChange: () => form.handleSubmit() }}>
+            {(field) => (
+              <Select
+                value={field.state.value}
+                onValueChange={(type) => {
+                  if (!type) return;
+                  field.handleChange(type as Draft["type"]);
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRANSFORMATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </form.Field>
+        </TableCell>
+        <TableCell>
+          <form.Field name="model" listeners={debounced}>
+            {(field) => (
+              <Input
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+                placeholder="openai/gpt-4o"
+              />
+            )}
+          </form.Field>
+        </TableCell>
+        <TableCell>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse row" : "Expand row"}
+          >
+            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          </Button>
+        </TableCell>
+        <TableCell>
+          {confirming ? (
+            <Button variant="destructive" size="sm" onClick={remove} onBlur={() => setConfirming(false)}>Sure?</Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}><Trash2 className="size-4" /></Button>
           )}
-        </form.Field>
-      </TableCell>
-      <TableCell>
-        <form.Field name="model" listeners={debounced}>
-          {(field) => (
-            <Input
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-              onBlur={field.handleBlur}
-              placeholder="openai/gpt-4o"
-            />
-          )}
-        </form.Field>
-      </TableCell>
-      <TableCell>
-        <form.Field name="prompt" listeners={debounced}>
-          {(field) => (
-            <Textarea
-              rows={2}
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-              onBlur={field.handleBlur}
-            />
-          )}
-        </form.Field>
-      </TableCell>
-      <TableCell>
-        <form.Field name="params" listeners={debounced}>
-          {(field) => <ParamsFields value={field.state.value} onChange={field.handleChange} />}
-        </form.Field>
-        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-      </TableCell>
-      <TableCell>
-        {confirming ? (
-          <Button variant="destructive" size="sm" onClick={remove} onBlur={() => setConfirming(false)}>Sure?</Button>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}><Trash2 className="size-4" /></Button>
-        )}
-      </TableCell>
-    </TableRow>
+        </TableCell>
+      </TableRow>
+      {expanded && (
+        <TableRow>
+          <TableCell colSpan={6} className="bg-muted/30">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Prompt</span>
+                <form.Field name="prompt" listeners={debounced}>
+                  {(field) => (
+                    <Textarea
+                      rows={4}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  )}
+                </form.Field>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Params</span>
+                <form.Field name="params" listeners={debounced}>
+                  {(field) => <ParamsFields value={field.state.value} onChange={field.handleChange} />}
+                </form.Field>
+              </div>
+            </div>
+            {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }

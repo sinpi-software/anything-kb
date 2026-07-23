@@ -161,7 +161,7 @@ class _FakeChat:
 
 
 class _FakeResolutionClient:
-    """Stands in for OpenRouter, exposing only the `.chat.send` surface resolve_entity uses."""
+    """Stands in for OpenRouter, exposing only the `.chat.send` surface resolution uses."""
 
     def __init__(self, answer: str) -> None:
         self.chat = _FakeChat(answer)
@@ -182,67 +182,39 @@ def _resolution_entity() -> ExtractedEntity:
     return ExtractedEntity(name="Ada", type="Person", description="Mathematician")
 
 
-def test_resolve_entity_multi_candidate_valid_answer_returns_id() -> None:
+def _resolve_batch(session: Any, client: Any) -> list[str | None]:
+    return knowledge_mod.resolve_entities_batch(session, client, "model", "org-1", [_resolution_entity()], {})
+
+
+def test_resolve_batch_multi_candidate_valid_answer_returns_id() -> None:
     session = _FakeNeoSession(
         [{"id": "a", "name": "Ada", "summary": "s1"}, {"id": "b", "name": "Ada Byron", "summary": "s2"}]
     )
-    client = _FakeResolutionClient("a")
-    result = knowledge_mod.resolve_entity(
-        session,  # type: ignore[arg-type]
-        client,  # type: ignore[arg-type]
-        "model",
-        "org-1",
-        _resolution_entity(),
-        {},
-    )
-    assert result == "a"
+    client = _FakeResolutionClient('{"resolutions": [{"index": 0, "id": "a"}]}')
+    assert _resolve_batch(session, client) == ["a"]
     assert client.chat.send_called
 
 
-def test_resolve_entity_multi_candidate_hallucinated_answer_returns_none() -> None:
+def test_resolve_batch_multi_candidate_hallucinated_answer_returns_none() -> None:
     session = _FakeNeoSession(
         [{"id": "a", "name": "Ada", "summary": "s1"}, {"id": "b", "name": "Ada Byron", "summary": "s2"}]
     )
-    client = _FakeResolutionClient("not-a-real-id")
-    result = knowledge_mod.resolve_entity(
-        session,  # type: ignore[arg-type]
-        client,  # type: ignore[arg-type]
-        "model",
-        "org-1",
-        _resolution_entity(),
-        {},
-    )
-    assert result is None
+    client = _FakeResolutionClient('{"resolutions": [{"index": 0, "id": "not-a-real-id"}]}')
+    assert _resolve_batch(session, client) == [None]
     assert client.chat.send_called
 
 
-def test_resolve_entity_single_candidate_skips_llm() -> None:
+def test_resolve_batch_single_candidate_skips_llm() -> None:
     session = _FakeNeoSession([{"id": "a", "name": "Ada", "summary": "s1"}])
-    client = _FakeResolutionClient("a")
-    result = knowledge_mod.resolve_entity(
-        session,  # type: ignore[arg-type]
-        client,  # type: ignore[arg-type]
-        "model",
-        "org-1",
-        _resolution_entity(),
-        {},
-    )
-    assert result == "a"
+    client = _FakeResolutionClient("unused")
+    assert _resolve_batch(session, client) == ["a"]
     assert not client.chat.send_called
 
 
-def test_resolve_entity_no_candidates_skips_llm() -> None:
+def test_resolve_batch_no_candidates_skips_llm() -> None:
     session = _FakeNeoSession([])
-    client = _FakeResolutionClient("a")
-    result = knowledge_mod.resolve_entity(
-        session,  # type: ignore[arg-type]
-        client,  # type: ignore[arg-type]
-        "model",
-        "org-1",
-        _resolution_entity(),
-        {},
-    )
-    assert result is None
+    client = _FakeResolutionClient("unused")
+    assert _resolve_batch(session, client) == [None]
     assert not client.chat.send_called
 
 
@@ -333,7 +305,7 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_org_scoped() -> N
 
 class _NullClient:
     """Stands in for OpenRouter. `chat.send` must never be reached because every
-    LLM-backed function (extract_knowledge, resolve_entity, merge_summary) is monkeypatched
+    LLM-backed function (extract_knowledge, resolve_entities_batch, merge_summary) is monkeypatched
     below, so this client never needs to actually send anything."""
 
     def __enter__(self) -> "_NullClient":
@@ -361,7 +333,8 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # Stub every OpenRouter-backed step so no real LLM call happens.
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
-    monkeypatch.setattr(knowledge_mod, "resolve_entity", lambda *a, **k: None)  # every entity resolves as new
+    # every entity resolves as new (a[4] is the entities list)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
     monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
     monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
 

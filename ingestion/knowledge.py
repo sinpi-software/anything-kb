@@ -136,15 +136,7 @@ def fulltext_candidate_query(org_id: str, entity_type: str, query_text: str, lim
     return query, {"q": escape_lucene(query_text), "org_id": org_id, "type": entity_type, "limit": limit}
 
 
-def resolve_entity(
-    session: Session,
-    client: OpenRouter,
-    model: str,
-    org_id: str,
-    entity: ExtractedEntity,
-    llm_params: dict[str, Any],
-) -> str | None:
-    limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
+def _gather_candidates(session: Session, org_id: str, entity: ExtractedEntity, limit: int) -> list[dict[str, Any]]:
     candidates = [
         dict(r) for r in session.run(*candidate_query(org_id, entity.type, normalize_name(entity.name), limit))
     ]
@@ -156,30 +148,69 @@ def resolve_entity(
                 seen.add(r["id"])
     except Exception:
         pass
-    candidates = candidates[:limit]
+    return candidates[:limit]
 
-    if not candidates:
-        return None
-    if len(candidates) == 1:
-        return str(candidates[0]["id"])
 
-    listed = "\n".join(f"- id={c['id']}: {c['name']} — {c['summary']}" for c in candidates)
-    answer = (
-        _chat(
-            client,
-            model,
-            [
-                {
-                    "role": "system",
-                    "content": "Is the new entity the SAME as an existing one? Reply ONLY its id, or NEW.",
-                },
-                {"role": "user", "content": f"New: {entity.name} ({entity.type}) — {entity.description}\n\n{listed}"},
-            ],
-            llm_params,
-        )
-        or "NEW"
-    ).strip()
-    return answer if answer in {str(c["id"]) for c in candidates} else None
+class _Resolution(BaseModel):
+    index: int
+    id: str  # a candidate id, or "NEW"
+
+
+class _BatchResolution(BaseModel):
+    resolutions: list[_Resolution] = []
+
+
+def resolve_entities_batch(
+    session: Session,
+    client: OpenRouter,
+    model: str,
+    org_id: str,
+    entities: list[ExtractedEntity],
+    llm_params: dict[str, Any],
+) -> list[str | None]:
+    """For each entity, the id of the existing entity it refers to, or None if new. Entities with
+    0 or 1 candidates need no LLM; the ambiguous rest are resolved in a single batched call."""
+    limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
+    candidates = [_gather_candidates(session, org_id, e, limit) for e in entities]
+    resolved: list[str | None] = []
+    ambiguous: list[int] = []
+    for i, cands in enumerate(candidates):
+        if len(cands) == 1:
+            resolved.append(str(cands[0]["id"]))
+        else:
+            resolved.append(None)  # 0 candidates -> new; 2+ -> decided by the batch call below
+            if cands:
+                ambiguous.append(i)
+
+    if ambiguous:
+        blocks = [
+            f"[{i}] {entities[i].name} ({entities[i].type}) — {entities[i].description}\n"
+            + "\n".join(f"    - id={c['id']}: {c['name']} — {c['summary']}" for c in candidates[i])
+            for i in ambiguous
+        ]
+        messages = [
+            {
+                "role": "system",
+                "content": "For each numbered new entity, decide whether it is the SAME as one of its listed "
+                "candidates. Return that candidate's id, or NEW if none match.",
+            },
+            {"role": "user", "content": "\n\n".join(blocks)},
+        ]
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "resolutions",
+                "strict": True,
+                "schema": _strict_schema(_BatchResolution.model_json_schema()),
+            },
+        }
+        content = _chat(client, model, messages, llm_params, schema)
+        if content:
+            valid = {i: {str(c["id"]) for c in candidates[i]} for i in ambiguous}
+            for r in _BatchResolution.model_validate_json(content).resolutions:
+                if r.index in valid and r.id in valid[r.index]:  # ignore hallucinated ids / "NEW"
+                    resolved[r.index] = r.id
+    return resolved
 
 
 def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_params: dict[str, Any]) -> str:
@@ -256,14 +287,14 @@ def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
     name_to_id: dict[str, str] = {}
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
         extraction = extract_knowledge(client, model, prompt, entity_types, text, params)
-        for entity in extraction.entities:
-            if entity.type.lower() not in allowed:
-                continue
-            entity_id = resolve_entity(neo, client, model, org_id, entity, params)
-            if entity_id is None:
+        entities = [e for e in extraction.entities if e.type.lower() in allowed]
+        resolved_ids = resolve_entities_batch(neo, client, model, org_id, entities, params)
+        for entity, existing_id in zip(entities, resolved_ids, strict=True):
+            if existing_id is None:
                 entity_id, summary = str(uuid.uuid4()), entity.description
                 created += 1
             else:
+                entity_id = existing_id
                 row = neo.run(
                     "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
                     {"id": entity_id, "org_id": org_id},

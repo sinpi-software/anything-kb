@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from neo4j import Session
@@ -32,6 +33,29 @@ class KnowledgeExtraction(BaseModel):
     relationships: list[ExtractedRelationship] = []
 
 
+def _chat(
+    client: OpenRouter,
+    model: str,
+    messages: list[dict[str, str]],
+    llm_params: dict[str, Any],
+    response_format: dict[str, Any] | None = None,
+) -> str | None:
+    """One chat completion under the LLM concurrency limit; None if the model returned no text.
+
+    Every LLM call in this module goes through here, so the concurrency gate can't be
+    forgotten. Args are assembled into a kwargs dict — besides being tidy, it sidesteps the
+    SDK's message-type overloads (which reject plain str-keyed dicts under strict typing,
+    though they work fine at runtime, as transformations.py relies on).
+    """
+    kwargs: dict[str, Any] = {"model": model, "messages": messages, **llm_params}
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
+        result = client.chat.send(**kwargs)
+    content = result.choices[0].message.content
+    return content if isinstance(content, str) else None
+
+
 def build_extraction_messages(prompt: str, entity_types: list[str], text: str) -> list[dict[str, str]]:
     system = (
         f"{prompt}\n\n"
@@ -53,23 +77,17 @@ def extract_knowledge(
     text: str,
     llm_params: dict[str, Any],
 ) -> KnowledgeExtraction:
-    # The SDK's overloads want its own TypedDict/BaseModel message types; plain
-    # str-keyed dicts work fine at runtime (see transformations.py, which sends
-    # the same shape) but only type-check there because that call site never
-    # gives `client` an explicit `OpenRouter` annotation, so mypy treats it as
-    # Any and skips the overload check. Here `client` is explicitly typed per
-    # this module's interface, which surfaces the mismatch.
-    result = client.chat.send(  # type: ignore[call-overload]
-        model=model,
-        messages=build_extraction_messages(prompt, entity_types, text),
+    content = _chat(
+        client,
+        model,
+        build_extraction_messages(prompt, entity_types, text),
+        llm_params,
         response_format={
             "type": "json_schema",
             "json_schema": {"name": "knowledge_extraction", "schema": KnowledgeExtraction.model_json_schema()},
         },
-        **llm_params,
     )
-    content = result.choices[0].message.content
-    if not isinstance(content, str):
+    if content is None:
         raise ValueError("LLM returned no text content")
     return KnowledgeExtraction.model_validate_json(content)
 
@@ -104,12 +122,9 @@ def candidate_query(org_id: str, entity_type: str, name_normalized: str, limit: 
     return query, params
 
 
-def fulltext_candidate_query(
-    org_id: str, entity_type: str, query_text: str, limit: int
-) -> tuple[str, dict[str, Any]]:
-    # Full-text match over name + aliases (the `entity_name` index from bootstrap_schema),
-    # then filtered down to the org + type — queryNodes searches across ALL orgs, so this
-    # WHERE clause is the only thing keeping the lookup org-scoped.
+def fulltext_candidate_query(org_id: str, entity_type: str, query_text: str, limit: int) -> tuple[str, dict[str, Any]]:
+    # Full-text match over name + aliases (the `entity_name` index), then filtered to the
+    # org + type — queryNodes searches ALL orgs, so this WHERE clause is the org boundary.
     query = (
         "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score "
         "WHERE e.org_id = $org_id AND e.type = $type "
@@ -125,16 +140,34 @@ def fulltext_candidate_query(
     return query, params
 
 
+def _gather_candidates(session: Session, org_id: str, entity: ExtractedEntity, limit: int) -> list[dict[str, Any]]:
+    """Existing entities that might be the same as `entity`: exact/alias matches, plus
+    full-text matches that catch name variants ("Barack Obama" vs "President Obama"). A
+    malformed full-text query just contributes nothing rather than failing resolution."""
+    exact_query, exact_params = candidate_query(org_id, entity.type, normalize_name(entity.name), limit)
+    candidates = [dict(record) for record in session.run(exact_query, exact_params)]
+
+    ft_query, ft_params = fulltext_candidate_query(org_id, entity.type, entity.name, limit)
+    try:
+        fulltext = [dict(record) for record in session.run(ft_query, ft_params)]
+    except Exception:
+        fulltext = []
+
+    seen = {c["id"] for c in candidates}
+    for c in fulltext:
+        if c["id"] not in seen:
+            candidates.append(c)
+            seen.add(c["id"])
+    return candidates[:limit]
+
+
 def build_resolution_messages(entity: ExtractedEntity, candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     listed = "\n".join(f'- id={c["id"]}: {c["name"]} — {c["summary"]}' for c in candidates)
     system = (
         "You resolve whether a newly mentioned entity is the SAME as one of the existing "
         "entities. Reply with ONLY the matching id, or the word NEW if none match."
     )
-    user = (
-        f"New entity: {entity.name} ({entity.type}) — {entity.description}\n\n"
-        f"Existing candidates:\n{listed}"
-    )
+    user = f"New entity: {entity.name} ({entity.type}) — {entity.description}\n\nExisting candidates:\n{listed}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -146,43 +179,17 @@ def resolve_entity(
     entity: ExtractedEntity,
     llm_params: dict[str, Any],
 ) -> str | None:
-    limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
-    query, params = candidate_query(org_id, entity.type, normalize_name(entity.name), limit)
-    candidates = [dict(record) for record in session.run(query, params)]
-
-    # Full-text match catches name variants (e.g. "Barack Obama" vs "President Obama") that
-    # exact/alias matching above misses. A malformed or empty query string shouldn't fail
-    # resolution — it just contributes zero extra candidates.
-    ft_query, ft_params = fulltext_candidate_query(org_id, entity.type, entity.name, limit)
-    try:
-        ft_candidates = [dict(record) for record in session.run(ft_query, ft_params)]
-    except Exception:
-        ft_candidates = []
-
-    seen_ids = {c["id"] for c in candidates}
-    for c in ft_candidates:
-        if c["id"] not in seen_ids:
-            candidates.append(c)
-            seen_ids.add(c["id"])
-    candidates = candidates[:limit]
-
+    """The id of the existing entity `entity` refers to, or None if it's new."""
+    candidates = _gather_candidates(session, org_id, entity, config.KNOWLEDGE_RESOLUTION_CANDIDATES)
     if not candidates:
         return None
     if len(candidates) == 1:
         return str(candidates[0]["id"])
-    # Same plain str-keyed dict shape as extract_knowledge above; mypy resolves this call
-    # (no response_format kwarg) to a single overload and flags the messages arg directly,
-    # rather than the ambiguous-overload error extract_knowledge triggers.
-    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
-        result = client.chat.send(
-            model=model,
-            messages=build_resolution_messages(entity, candidates),  # type: ignore[arg-type]
-            **llm_params,
-        )
-    content = result.choices[0].message.content
-    answer = content.strip() if isinstance(content, str) else "NEW"
+
+    content = _chat(client, model, build_resolution_messages(entity, candidates), llm_params)
+    answer = content.strip() if content else "NEW"
     valid_ids = {str(c["id"]) for c in candidates}
-    return answer if answer in valid_ids else None
+    return answer if answer in valid_ids else None  # ignore a hallucinated / "NEW" answer
 
 
 def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_params: dict[str, Any]) -> str:
@@ -196,15 +203,8 @@ def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_p
         },
         {"role": "user", "content": f"Existing summary:\n{existing}\n\nNew information:\n{new}"},
     ]
-    # Same plain str-keyed dict shape as resolve_entity above; mypy resolves this call
-    # (no response_format kwarg) to a single overload and flags the messages arg directly.
-    result = client.chat.send(
-        model=model,
-        messages=messages,  # type: ignore[arg-type]
-        **llm_params,
-    )
-    content = result.choices[0].message.content
-    return content.strip() if isinstance(content, str) else existing
+    content = _chat(client, model, messages, llm_params)
+    return content.strip() if content else existing
 
 
 def upsert_entity(session: Session, org_id: str, entity_id: str, entity: ExtractedEntity, summary: str) -> None:
@@ -251,6 +251,14 @@ def write_provenance(session: Session, org_id: str, entity_id: str, artifact_id:
     )
 
 
+def _current_summary(session: Session, org_id: str, entity_id: str) -> str:
+    record = session.run(
+        "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS summary",
+        {"id": entity_id, "org_id": org_id},
+    ).single()
+    return record["summary"] if record else ""
+
+
 class KnowledgeTransformOutput(BaseModel):
     entities_created: int
     entities_merged: int
@@ -261,77 +269,91 @@ class KnowledgeTransformOutput(BaseModel):
         return self.model_dump_json(), "application/json"
 
 
-def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
-    # SQLAlchemy's UUID(as_uuid=True) columns hand back uuid.UUID objects, not str
-    # (despite the Mapped[str] annotation). Neo4j's driver rejects raw UUID objects
-    # as query parameters, so every id is coerced to str before it touches the graph.
-    # run_transform_pipeline chains a prior transform's raw output id straight into
-    # this function's artifact_id, so the coercion has to happen here, not upstream.
-    artifact_id = str(artifact_id)
+@dataclass(frozen=True)
+class _Context:
+    """The per-run config, resolved once from Postgres and threaded into the graph work."""
+
+    model: str
+    prompt: str
+    entity_types: list[str]
+    llm_params: dict[str, Any]
+    org_id: str
+    artifact_id: str
+    text: str
+
+
+def _load_context(transformation_id: str, artifact_id: str) -> _Context:
     with get_postgres_session() as session:
         transformation = session.get(Transformation, transformation_id)
         if transformation is None:
             raise ValueError(f"Transformation {transformation_id} not found")
-        model = transformation.model
-        prompt = transformation.prompt
-        params = dict(transformation.params or {})
-        entity_types = params.pop("entity_types", [])
-        llm_params = params  # remaining keys are LLM knobs (temperature, etc.)
-
         artifact = session.get(Artifact, artifact_id)
         if artifact is None:
             raise ValueError(f"Artifact {artifact_id} not found")
         if artifact.org_id is None:
             raise ValueError(f"Artifact {artifact_id} has no org")
-        org_id = str(artifact.org_id)
-        text = artifact.data
 
-    created = merged = rels = 0
-    with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client:
-        with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
-            extraction = extract_knowledge(client, model, prompt, entity_types, text, llm_params)
+        params = dict(transformation.params or {})
+        entity_types = params.pop("entity_types", [])
+        return _Context(
+            model=transformation.model,
+            prompt=transformation.prompt,
+            entity_types=entity_types,
+            llm_params=params,  # whatever's left are LLM knobs (temperature, ...)
+            org_id=str(artifact.org_id),  # str: the Neo4j driver rejects raw uuid.UUID params
+            artifact_id=artifact_id,
+            text=artifact.data,
+        )
 
-        name_to_id: dict[str, str] = {}
-        allowed = {t.lower() for t in entity_types}
-        with get_neo4j_session() as neo:
-            for entity in extraction.entities:
-                if entity.type.lower() not in allowed:
-                    continue
-                existing_id = resolve_entity(neo, client, model, org_id, entity, llm_params)
-                if existing_id is None:
-                    entity_id = str(uuid.uuid4())
-                    summary = entity.description
-                    created += 1
-                else:
-                    entity_id = existing_id
-                    record = neo.run(
-                        "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
-                        {"id": entity_id, "org_id": org_id},
-                    ).single()
-                    existing_summary = record["s"] if record else ""
-                    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
-                        summary = merge_summary(client, model, existing_summary, entity.description, llm_params)
-                    merged += 1
-                upsert_entity(neo, org_id, entity_id, entity, summary)
-                write_provenance(neo, org_id, entity_id, artifact_id)
-                name_to_id[normalize_name(entity.name)] = entity_id
 
-            for rel in extraction.relationships:
-                source_id = name_to_id.get(normalize_name(rel.source_name))
-                target_id = name_to_id.get(normalize_name(rel.target_name))
-                if source_id and target_id:
-                    write_relationship(neo, org_id, source_id, target_id, rel.type, artifact_id)
-                    rels += 1
+def _ingest(client: OpenRouter, ctx: _Context, extraction: KnowledgeExtraction) -> tuple[int, int, int]:
+    """Write the extraction into the org's graph. Returns (created, merged, relationships)."""
+    created = merged = relationships = 0
+    allowed = {t.lower() for t in ctx.entity_types}
+    name_to_id: dict[str, str] = {}
 
+    with get_neo4j_session() as neo:
+        for entity in extraction.entities:
+            if entity.type.lower() not in allowed:
+                continue  # the LLM strayed outside the org's configured entity_types
+
+            existing_id = resolve_entity(neo, client, ctx.model, ctx.org_id, entity, ctx.llm_params)
+            if existing_id is None:
+                entity_id, summary = str(uuid.uuid4()), entity.description
+                created += 1
+            else:
+                entity_id = existing_id
+                current = _current_summary(neo, ctx.org_id, entity_id)
+                summary = merge_summary(client, ctx.model, current, entity.description, ctx.llm_params)
+                merged += 1
+
+            upsert_entity(neo, ctx.org_id, entity_id, entity, summary)
+            write_provenance(neo, ctx.org_id, entity_id, ctx.artifact_id)
+            name_to_id[normalize_name(entity.name)] = entity_id
+
+        for rel in extraction.relationships:
+            source_id = name_to_id.get(normalize_name(rel.source_name))
+            target_id = name_to_id.get(normalize_name(rel.target_name))
+            if source_id and target_id:
+                write_relationship(neo, ctx.org_id, source_id, target_id, rel.type, ctx.artifact_id)
+                relationships += 1
+
+    return created, merged, relationships
+
+
+def _persist_output(ctx: _Context, created: int, merged: int, relationships: int) -> str:
     output = KnowledgeTransformOutput(
-        entities_created=created, entities_merged=merged, relationships_created=rels, source_artifact_id=artifact_id
+        entities_created=created,
+        entities_merged=merged,
+        relationships_created=relationships,
+        source_artifact_id=ctx.artifact_id,
     )
     data, content_type = output.to_model()
     with get_postgres_session() as session:
         out = Artifact(
-            org_id=org_id,
+            org_id=ctx.org_id,
             ref_table_name=Artifact.__tablename__,
-            ref_table_id=artifact_id,
+            ref_table_id=ctx.artifact_id,
             type=content_type,
             data=data,
         )
@@ -340,3 +362,13 @@ def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
         out_id = out.id
         session.commit()
     return out_id
+
+
+def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
+    # str(): run_transform_pipeline chains a prior transform's raw output id (a uuid.UUID,
+    # despite the Mapped[str] annotation) into this call, and Neo4j rejects UUID params.
+    ctx = _load_context(transformation_id, str(artifact_id))
+    with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client:
+        extraction = extract_knowledge(client, ctx.model, ctx.prompt, ctx.entity_types, ctx.text, ctx.llm_params)
+        created, merged, relationships = _ingest(client, ctx, extraction)
+    return _persist_output(ctx, created, merged, relationships)

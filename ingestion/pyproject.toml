@@ -11,6 +11,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.139.2",
     "feedparser>=6.0.12",
+    "neo4j>=6.2.0",
     "openrouter>=0.10.8",
     "prefect>=3.7.8",
     "psycopg2-binary>=2.9.12",
@@ -38,6 +39,10 @@ exclude = ["alembic/versions/", "\\.venv/"]
 
 [[tool.mypy.overrides]]
 module = ["curl_cffi.*", "prefect.*", "argon2.*", "feedparser.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["neo4j.*"]
 ignore_missing_imports = true
 
 

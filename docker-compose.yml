@@ -17,6 +17,24 @@ services:
       timeout: 5s
       retries: 10
 
+  neo4j:
+    image: neo4j:5
+    container_name: ingestion-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/ingestion
+    ports:
+      - "7474:7474"  # HTTP / Neo4j Browser
+      - "7687:7687"  # Bolt
+    volumes:
+      - ingestion-neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ingestion 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy
   # Then open ./schemaspy/output/index.html
@@ -34,3 +52,4 @@ services:
 
 volumes:
   ingestion-pgdata:
+  ingestion-neo4jdata:

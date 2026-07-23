@@ -37,6 +37,10 @@ def main() -> None:
 
     ensure_concurrency_limits()
 
+    from neo4j_client import bootstrap_schema
+
+    bootstrap_schema()
+
     # Ingestion runs on a schedule; the transform pipeline runs when a markdown artifact
     # is created — the trigger (and thus its automation) is declared here in code, not the UI.
     ingest = rss_feed_flow.to_deployment(name=config.FLOW_NAME, interval=config.POLL_INTERVAL_SECONDS)

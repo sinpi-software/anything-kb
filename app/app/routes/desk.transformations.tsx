@@ -2,8 +2,22 @@ import { useEffect, useState } from "react";
 import { useFetcher, type SubmitTarget } from "react-router";
 import { toast } from "sonner";
 import { Trash2, Plus, GripVertical } from "lucide-react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Route } from "./+types/desk.transformations";
 import { listTransformations, type TransformationRow } from "~/services/transformations.server";
@@ -78,7 +92,10 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
   const addFetcher = useFetcher();
   const reorderFetcher = useFetcher();
   const [order, setOrder] = useState<TransformationRow[]>(transformations);
-  const sensors = useSensors(useSensor(PointerSensor));
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => setOrder(transformations), [transformations]);
 

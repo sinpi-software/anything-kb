@@ -24,7 +24,11 @@ export async function action({ request }: Route.ActionArgs) {
     if (!orgId) return Response.json({ error: "org_id is required" }, { status: 400 });
     const parsed = transformationInputSchema.safeParse(body);
     if (!parsed.success) return Response.json({ errors: parsed.error.flatten() }, { status: 422 });
-    return Response.json(await createTransformation(orgId, parsed.data), { status: 201 });
+    try {
+      return Response.json(await createTransformation(orgId, parsed.data), { status: 201 });
+    } catch {
+      return Response.json({ error: "request failed" }, { status: 500 });
+    }
   }
 
   if (request.method === "PATCH") {
@@ -34,8 +38,12 @@ export async function action({ request }: Route.ActionArgs) {
     if (!orgId) return Response.json({ error: "org_id is required" }, { status: 400 });
     const parsed = reorderSchema.safeParse(body);
     if (!parsed.success) return Response.json({ error: "invalid reorder request" }, { status: 422 });
-    await reorderTransformations(orgId, parsed.data.ids);
-    return Response.json({ ok: true });
+    try {
+      await reorderTransformations(orgId, parsed.data.ids);
+      return Response.json({ ok: true });
+    } catch {
+      return Response.json({ error: "request failed" }, { status: 500 });
+    }
   }
 
   return Response.json({ error: "method not allowed" }, { status: 405 });

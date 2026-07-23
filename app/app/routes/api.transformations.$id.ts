@@ -14,14 +14,22 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
     const parsed = transformationInputSchema.safeParse(body);
     if (!parsed.success) return Response.json({ errors: parsed.error.flatten() }, { status: 422 });
-    const row = await updateTransformation(id, parsed.data);
-    if (!row) return Response.json({ error: "not found" }, { status: 404 });
-    return Response.json(row);
+    try {
+      const row = await updateTransformation(id, parsed.data);
+      if (!row) return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json(row);
+    } catch {
+      return Response.json({ error: "request failed" }, { status: 500 });
+    }
   }
 
   if (request.method === "DELETE") {
-    await deleteTransformation(id);
-    return Response.json({ ok: true });
+    try {
+      await deleteTransformation(id);
+      return Response.json({ ok: true });
+    } catch {
+      return Response.json({ error: "request failed" }, { status: 500 });
+    }
   }
 
   return Response.json({ error: "method not allowed" }, { status: 405 });

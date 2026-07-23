@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, describe, expect, it } from "vitest";
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, closeDb } from "~/db/client.server";
 import { orgs, transformations } from "~/db/schema";
 import { reorderTransformations } from "./transformations.server";

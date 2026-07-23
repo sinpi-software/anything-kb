@@ -308,9 +308,42 @@ git commit -m "feat(app): shared zod schema for transformations"
   - `deleteTransformation(id: string): Promise<void>`
   - `reorderTransformations(orgId: string, ids: string[]): Promise<void>`
 
-- [ ] **Step 1: Write the implementation**
+- [ ] **Step 1: Set up the Vitest harness (first task whose tests need `~` alias resolution)**
 
-`app/services/transformations.server.ts`:
+The service uses `~/db/…` alias imports, so tests loading it need `vite-tsconfig-paths`. Establish the shared harness here; Task 5 reuses it.
+
+```bash
+cd app && nvm use
+npm install -D vite-tsconfig-paths jsdom @testing-library/react @testing-library/jest-dom @testing-library/user-event
+```
+
+Add a `test` script to `app/package.json` `scripts`: `"test": "vitest run"`.
+
+Create `app/vitest.config.ts`:
+```ts
+import { defineConfig } from "vitest/config";
+import tsconfigPaths from "vite-tsconfig-paths";
+
+export default defineConfig({
+  plugins: [tsconfigPaths()],
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./app/test/setup.ts"],
+  },
+});
+```
+
+Create `app/app/test/setup.ts`:
+```ts
+import "@testing-library/jest-dom/vitest";
+```
+
+The `environment: "jsdom"` default is for later component tests; the DB integration test below opts out per-file with `// @vitest-environment node`.
+
+- [ ] **Step 2: Write the implementation**
+
+`app/app/services/transformations.server.ts`:
 ```ts
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "~/db/client.server";
@@ -383,10 +416,11 @@ export async function reorderTransformations(orgId: string, ids: string[]): Prom
 
 If TypeScript complains that `params` is `unknown` on insert/update (jsonb columns infer `unknown`), cast the value: `params: (input.params ?? null) as typeof transformations.$inferInsert["params"]`.
 
-- [ ] **Step 2: Write the failing integration test**
+- [ ] **Step 3: Write the failing integration test**
 
-`app/services/transformations.reorder.test.ts`:
+`app/app/services/transformations.reorder.test.ts` (note the `@vitest-environment node` pragma — this test hits Postgres and does not need jsdom):
 ```ts
+// @vitest-environment node
 import { afterAll, describe, expect, it } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
 import { db, closeDb } from "~/db/client.server";
@@ -439,16 +473,16 @@ describe("reorderTransformations (integration)", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails, then passes**
+- [ ] **Step 4: Run test to verify it fails, then passes**
 
-Run: `cd app && npx vitest run app/services/transformations.reorder.test.ts`
-First run (before Step 1 file existed) would fail to import; with the service written it should PASS. If it errors that `orgs` is not exported from `~/db/schema`, open `app/db/schema.ts` and use the actual exported name for the orgs table.
+Run: `cd app && npx vitest run app/app/services/transformations.reorder.test.ts`
+Write the test first and confirm it fails (RED) — before the service exists it fails to import `./transformations.server`. With the service written it should PASS. If it errors that `orgs` is not exported from `~/db/schema`, open `app/app/db/schema.ts` and use the actual exported name for the orgs table.
 Expected: PASS. (Requires the docker Postgres running.)
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/services/transformations.server.ts app/services/transformations.reorder.test.ts
+git add app/app/services/transformations.server.ts app/app/services/transformations.reorder.test.ts app/vitest.config.ts app/app/test/setup.ts app/package.json app/package-lock.json
 git commit -m "feat(app): transformations service with deferred-constraint reorder"
 ```
 
@@ -572,54 +606,27 @@ git commit -m "feat(app): transformations REST resource routes"
 ## Task 5: Test harness + shadcn + read-only view
 
 **Files:**
-- Create: `vitest.config.ts`, `app/test/setup.ts`, `app/routes/desk.transformations.tsx`, `app/components/transformations/ParamsFields.tsx`
-- Modify: `app/root.tsx` (add `<Toaster />`), `app/package.json` (add `test` script)
+- Create: `app/app/routes/desk.transformations.tsx`, `app/app/components/transformations/ParamsFields.tsx`
+- Modify: `app/app/root.tsx` (add `<Toaster />`)
 - Add shadcn components: table, input, select, textarea, label, sonner
+- Add deps: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`
+
+Note: the Vitest harness (`vitest.config.ts`, `app/app/test/setup.ts`, `test` script, `vite-tsconfig-paths`, jsdom, testing-library) was already established in Task 3 — do not recreate it.
 
 **Interfaces:**
 - Consumes: `listTransformations` from `~/services/transformations.server`; `TRANSFORMATION_TYPES` from `~/schemas/transformation`.
 - Produces: route `desk.transformations` whose `loader` returns `{ orgId: string; transformations: TransformationRow[] }`; a `<ParamsFields>` component (used in Task 6); a passing snapshot test.
 
-- [ ] **Step 1: Install test + UI deps and add shadcn components**
+- [ ] **Step 1: Install UI deps and add shadcn components**
 
 ```bash
 cd app && nvm use
-npm install -D jsdom @testing-library/react @testing-library/jest-dom @testing-library/user-event vite-tsconfig-paths
 npm install @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities
 npx shadcn@latest add table input select textarea label sonner
 ```
-If shadcn prompts, accept defaults (it writes to `app/components/ui`). `sonner` also adds the `sonner` package.
+If shadcn prompts, accept defaults (it writes to `app/app/components/ui`, matching the existing `button.tsx` there). `sonner` also adds the `sonner` package. The Vitest harness already exists from Task 3.
 
-- [ ] **Step 2: Add the `test` script**
-
-In `app/package.json` `scripts`, add:
-```json
-"test": "vitest run"
-```
-
-- [ ] **Step 3: Write `vitest.config.ts` and `app/test/setup.ts`**
-
-`app/vitest.config.ts`:
-```ts
-import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
-
-export default defineConfig({
-  plugins: [tsconfigPaths()],
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./app/test/setup.ts"],
-  },
-});
-```
-
-`app/test/setup.ts`:
-```ts
-import "@testing-library/jest-dom/vitest";
-```
-
-- [ ] **Step 4: Add `<Toaster />` to the root**
+- [ ] **Step 2: Add `<Toaster />` to the root**
 
 In `app/root.tsx`, import and render the toaster once inside the app body:
 ```tsx

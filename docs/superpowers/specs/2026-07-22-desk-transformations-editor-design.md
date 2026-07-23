@@ -57,9 +57,21 @@ Postgres (transformations)   ← Python/Alembic owns the schema; Node never migr
 ### Reorder atomicity (the one non-obvious piece)
 
 The table has `UNIQUE(org_id, position)`. A naïve row-by-row position rewrite
-collides mid-update. `reorderTransformations(orgId, orderedIds)` runs in **one
-transaction with a two-phase renumber**: offset all affected rows to a
-non-colliding range (e.g. negative positions), then set the final positions.
+collides mid-update — every position in the new arrangement is already occupied by
+some row in the old one, so no ordering of per-row UPDATEs avoids a transient
+duplicate.
+
+**Resolution: make the constraint `DEFERRABLE INITIALLY DEFERRED`.** Postgres then
+checks uniqueness once at `COMMIT` rather than per-statement, so transient
+duplicates inside a transaction are legal. `reorderTransformations(orgId, orderedIds)`
+becomes a straightforward per-row position rewrite wrapped in one transaction — no
+parking pass, no negative-range trick.
+
+**Cross-service dependency:** Python/Alembic owns the schema, so this requires an
+**Alembic migration** in `ingestion/` to redefine the constraint as deferrable
+(drop + recreate `UNIQUE(org_id, position) DEFERRABLE INITIALLY DEFERRED`). This
+migration is a prerequisite for the Node reorder path and must land first. After it
+lands, re-run `drizzle-kit introspect` so the Node schema mirror stays current.
 
 ## Query & validation
 
@@ -114,14 +126,18 @@ explicitly in `routes.ts`.
 - **Dev:** `drizzle-kit`, plus a minimal **Vitest + React Testing Library** setup
   (none exists yet)
 - **shadcn components:** `table input select textarea label sonner`
+- **Prerequisite migration (Python side):** an Alembic migration in `ingestion/` that
+  redefines `UNIQUE(org_id, position)` on `transformations` as
+  `DEFERRABLE INITIALLY DEFERRED`. Must land before the Node reorder path; re-run
+  `drizzle-kit introspect` afterward.
 
 ## Testing
 
 Behavior-first, snapshot where it fits, proportional to risk:
 
 - **Shared Zod schema** — unit tests (valid/invalid params, required fields, type enum).
-- **`reorderTransformations`** — the two-phase renumber against the unique constraint
-  (the highest-risk logic).
+- **`reorderTransformations`** — reordering a multi-row chain succeeds under the
+  deferred constraint (the transient-duplicate case that would fail immediate-check).
 - **Editor component** — a snapshot of the default rendered table, then one variable
   changed (add row, edit cell) to verify primary/secondary effects.
 

@@ -17,5 +17,20 @@ services:
       timeout: 5s
       retries: 10
 
+  # On-demand DB schema docs. Generate with:
+  #   docker compose --profile tools run --rm schemaspy
+  # Then open ./schemaspy/output/index.html
+  schemaspy:
+    image: schemaspy/schemaspy:latest
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./schemaspy/output:/output
+    command: >
+      -t pgsql -host postgres -port 5432
+      -db ingestion -u ingestion -p ingestion -s public
+
 volumes:
   ingestion-pgdata:

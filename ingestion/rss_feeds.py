@@ -4,23 +4,29 @@ import curl_cffi
 import feedparser
 import trafilatura
 from prefect import flow, task
+from prefect.events import emit_event
 from prefect.logging import get_run_logger
 from sqlalchemy import func, update
 
+import config
 from db import get_postgres_session
-from models import Artifact, RssFeed, RssFeedItem
+from events import MARKDOWN_ARTIFACT_CREATED_EVENT
+from models import Artifact, RssFeed, RssFeedItem, RssFeedItemStatus
 from sanitize import sanitize
 
 
 @task
 def fetch_rss_feed_as_artifact(rss_feed_id: UUID, url: str) -> str:
     logger = get_run_logger()
+    logger.info("Fetching rss feed %s: %s", rss_feed_id, url)
 
-    r = curl_cffi.get(url, impersonate="chrome")
+    r = curl_cffi.get(url, impersonate=config.IMPERSONATE_BROWSER)
     logger.info("Fetched %s -> %s (%d bytes)", url, r.status_code, len(r.content))
 
     with get_postgres_session() as session:
+        feed = session.get(RssFeed, rss_feed_id)
         artifact = Artifact(
+            org_id=feed.org_id if feed else None,
             ref_table_name=RssFeed.__tablename__,
             ref_table_id=rss_feed_id,
             type="application/xml",
@@ -41,6 +47,7 @@ def fetch_rss_feed_as_artifact(rss_feed_id: UUID, url: str) -> str:
 @task
 def parse_rss_feed_as_rss_feed_item(rss_feed_id: UUID, artifact_id: UUID) -> list[str]:
     logger = get_run_logger()
+    logger.info("Parsing feed %s from artifact %s", rss_feed_id, artifact_id)
 
     with get_postgres_session() as session:
         artifact = session.get(Artifact, artifact_id)
@@ -52,6 +59,7 @@ def parse_rss_feed_as_rss_feed_item(rss_feed_id: UUID, artifact_id: UUID) -> lis
         parsed = feedparser.parse(artifact.data)
         if parsed.bozo:
             logger.warning("Malformed feed for %s: %s", rss_feed_id, parsed.bozo_exception)
+        logger.info("Feed %s returned %d entries", rss_feed_id, len(parsed.entries))
 
         title = parsed.feed.get("title")
         if title and rss_feed.title is None:
@@ -82,7 +90,7 @@ def parse_rss_feed_as_rss_feed_item(rss_feed_id: UUID, artifact_id: UUID) -> lis
     return created
 
 
-@task(retries=2, retry_delay_seconds=5)
+@task(retries=config.ARTICLE_FETCH_RETRIES, retry_delay_seconds=config.ARTICLE_FETCH_RETRY_DELAY_SECONDS)
 def fetch_rss_feed_item_as_artifact(rss_feed_item_id: str) -> str | None:
     logger = get_run_logger()
 
@@ -92,11 +100,20 @@ def fetch_rss_feed_item_as_artifact(rss_feed_item_id: str) -> str | None:
             logger.warning("Missing RssFeedItem %s; nothing to extract", rss_feed_item_id)
             return None
 
-        r = curl_cffi.get(rss_feed_item.link, impersonate="chrome", timeout=15)
+        feed = session.get(RssFeed, rss_feed_item.feed_id)
+        org_id = feed.org_id if feed else None
+
+        logger.info("Fetching article for item %s: %s", rss_feed_item_id, rss_feed_item.link)
+        r = curl_cffi.get(
+            rss_feed_item.link,
+            impersonate=config.IMPERSONATE_BROWSER,
+            timeout=config.ARTICLE_FETCH_TIMEOUT_SECONDS,
+        )
         logger.info("Fetched %s -> %s (%d bytes)", rss_feed_item.link, r.status_code, len(r.content))
 
         with get_postgres_session() as session:
             artifact = Artifact(
+                org_id=org_id,
                 ref_table_name=RssFeedItem.__tablename__,
                 ref_table_id=rss_feed_item_id,
                 type="application/html",
@@ -107,12 +124,14 @@ def fetch_rss_feed_item_as_artifact(rss_feed_item_id: str) -> str | None:
             artifact_id = artifact.id
             session.commit()
 
+    logger.info("Created html artifact %s for item %s", artifact_id, rss_feed_item_id)
     return artifact_id
 
 
 @task
 def extract_rss_feed_item_artifact_as_markdown_artifact(rss_feed_item_id: str, artifact_id: str) -> str | None:
     logger = get_run_logger()
+    logger.info("Extracting markdown from artifact %s for item %s", artifact_id, rss_feed_item_id)
 
     with get_postgres_session() as session:
         html_artifact = session.get(Artifact, artifact_id)
@@ -128,12 +147,15 @@ def extract_rss_feed_item_artifact_as_markdown_artifact(rss_feed_item_id: str, a
         )
 
         if extracted is None:
+            logger.info("No extractable content in artifact %s; skipping", artifact_id)
             return None
 
         logger.info("Extracted %d bytes from %d bytes of html", len(extracted), len(html_artifact.data))
+        org_id = html_artifact.org_id
 
         with get_postgres_session() as session:
             markdown_artifact = Artifact(
+                org_id=org_id,
                 ref_table_name=RssFeedItem.__tablename__,
                 ref_table_id=rss_feed_item_id,
                 type="text/markdown",
@@ -144,11 +166,17 @@ def extract_rss_feed_item_artifact_as_markdown_artifact(rss_feed_item_id: str, a
             markdown_artifact_id = markdown_artifact.id
             session.commit()
 
+    logger.info("Created markdown artifact %s for item %s", markdown_artifact_id, rss_feed_item_id)
+    emit_event(
+        event=MARKDOWN_ARTIFACT_CREATED_EVENT,
+        resource={"prefect.resource.id": f"{MARKDOWN_ARTIFACT_CREATED_EVENT}.{markdown_artifact_id}"},
+        payload={"artifact_id": markdown_artifact_id},
+    )
     return markdown_artifact_id
 
 
 @flow
-def rss_feed_flow():
+def rss_feed_flow() -> None:
     logger = get_run_logger()
 
     with get_postgres_session() as session:
@@ -158,15 +186,34 @@ def rss_feed_flow():
         logger.info("No rss feeds configured/enabled")
         return
 
-    extractions = []
+    # Ingestion ends at markdown extraction. Each extraction emits a
+    # MARKDOWN_ARTIFACT_CREATED_EVENT that triggers the transform-pipeline flow separately.
+    item_extractions = []
     for rss_feed_id, url in rss_feeds:
-        rss_feed_artifact_id = fetch_rss_feed_as_artifact.submit(rss_feed_id, url)
-        rss_feed_item_ids = parse_rss_feed_as_rss_feed_item.submit(rss_feed_id, rss_feed_artifact_id).result()
-        for rss_feed_item_id in rss_feed_item_ids:
-            rss_feed_item_artifact_id = fetch_rss_feed_item_as_artifact.submit(rss_feed_item_id)
-            extractions.append(
-                extract_rss_feed_item_artifact_as_markdown_artifact.submit(rss_feed_item_id, rss_feed_item_artifact_id)
-            )
+        rss_feed_artifact_id = fetch_rss_feed_as_artifact.submit(rss_feed_id, url)  # type: ignore[call-overload]
+        parse_rss_feed_as_rss_feed_item.submit(  # type: ignore[call-overload]
+            rss_feed_id, rss_feed_artifact_id
+        ).result()
 
-    for extraction in extractions:
+        # Process every pending item for the feed — new ones plus any stranded by a prior failed run.
+        with get_postgres_session() as session:
+            pending_item_ids = [
+                str(item.id)
+                for item in session.query(RssFeedItem)
+                .filter_by(feed_id=rss_feed_id, status=RssFeedItemStatus.PENDING.value)
+                .all()
+            ]
+
+        for rss_feed_item_id in pending_item_ids:
+            rss_feed_item_artifact_id = fetch_rss_feed_item_as_artifact.submit(rss_feed_item_id)
+            extraction = extract_rss_feed_item_artifact_as_markdown_artifact.submit(  # type: ignore[call-overload]
+                rss_feed_item_id, rss_feed_item_artifact_id
+            )
+            item_extractions.append((rss_feed_item_id, extraction))
+
+    for item_id, extraction in item_extractions:
         extraction.wait()
+        status = RssFeedItemStatus.COMPLETED if extraction.state.is_completed() else RssFeedItemStatus.FAILED
+        with get_postgres_session() as session:
+            session.execute(update(RssFeedItem).where(RssFeedItem.id == item_id).values(status=status.value))
+            session.commit()

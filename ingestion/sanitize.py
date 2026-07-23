@@ -12,5 +12,4 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def sanitize(text: str) -> str:
-    """Make text safe to store: strip NUL and other junk control characters."""
     return _CONTROL_CHARS.sub("", text)

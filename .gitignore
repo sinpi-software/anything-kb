@@ -1,2 +1,5 @@
 .env
 .env.local
+
+# SchemaSpy generated output
+schemaspy/output/

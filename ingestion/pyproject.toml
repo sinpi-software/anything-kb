@@ -11,6 +11,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.139.2",
     "feedparser>=6.0.12",
+    "openrouter>=0.10.8",
     "prefect>=3.7.8",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
@@ -36,7 +37,7 @@ strict = true
 exclude = ["alembic/versions/", "\\.venv/"]
 
 [[tool.mypy.overrides]]
-module = ["curl_cffi.*", "prefect.*", "argon2.*"]
+module = ["curl_cffi.*", "prefect.*", "argon2.*", "feedparser.*"]
 ignore_missing_imports = true
 
 
@@ -64,6 +65,7 @@ prepend_sys_path = [
 [dependency-groups]
 dev = [
     "mypy>=2.3.0",
+    "pytest>=9.1.1",
     "ruff>=0.15.22",
 ]
 

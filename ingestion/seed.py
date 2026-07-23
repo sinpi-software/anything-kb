@@ -1,6 +1,8 @@
 import os
+from typing import Any
 
 import dotenv
+from sqlalchemy.orm import DeclarativeBase, Session
 
 # Load env from the project root (same order as main.py), so the admin
 # credentials and INGESTION_POSTGRES_URL are available when run standalone.
@@ -10,7 +12,12 @@ dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.local")
 dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.sample")
 
 
-def get_or_create(session, model, defaults=None, **filters):
+def get_or_create[ModelT: DeclarativeBase](
+    session: Session,
+    model: type[ModelT],
+    defaults: dict[str, Any] | None = None,
+    **filters: Any,
+) -> tuple[ModelT, bool]:
     instance = session.query(model).filter_by(**filters).one_or_none()
     if instance is not None:
         return instance, False
@@ -24,7 +31,8 @@ def seed_database() -> None:
     from argon2 import PasswordHasher
 
     from db import get_postgres_session
-    from models import Org, OrgSettings, OrgUser, OrgUserRole, RssFeed, User
+    from models import Org, OrgSettings, OrgUser, OrgUserRole, RssFeed, Transformation, TransformationType, User
+    from transformations import validate_transform_config
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
@@ -81,6 +89,28 @@ def seed_database() -> None:
             title="Hacker News",
         )
 
+        # Ordered transform chain for the org — each step's output feeds the next (by position).
+        transform_model = "openai/gpt-5-nano"
+        transform_chain = [
+            (0, TransformationType.SUMMARIZE.value, "Summarize this article in 3 concise sentences."),
+            (
+                1,
+                TransformationType.SCORE.value,
+                "Given this summary, is the story newsworthy? Score 0-10 with a short rationale.",
+            ),
+        ]
+        transforms_created = []
+        for position, transform_type, prompt in transform_chain:
+            validate_transform_config(transform_type, transform_model, prompt, None)
+            _transform, created = get_or_create(
+                session,
+                Transformation,
+                defaults=dict(type=transform_type, model=transform_model, prompt=prompt, **audit),
+                org_id=org.id,
+                position=position,
+            )
+            transforms_created.append((f"transform[{position}] {transform_type}", created))
+
         session.commit()
 
     for label, created in [
@@ -89,6 +119,7 @@ def seed_database() -> None:
         ("org membership", membership_created),
         ("org settings", settings_created),
         ("rss feed", rss_feed_created),
+        *transforms_created,
     ]:
         print(f"  {'created' if created else 'exists '}  {label}")
 

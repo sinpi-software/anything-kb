@@ -121,6 +121,40 @@ export const orgSettings = pgTable("org_settings", {
 	unique("org_settings_org_id_setting_name_key").on(table.orgId, table.settingName),
 ]);
 
+export const transformations = pgTable("transformations", {
+	orgId: uuid("org_id").notNull(),
+	position: integer().default(0).notNull(),
+	type: text().notNull(),
+	model: text(),
+	prompt: text().notNull(),
+	params: jsonb(),
+	createdById: uuid("created_by_id"),
+	updatedById: uuid("updated_by_id"),
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().notNull(),
+	name: text().notNull(),
+	gate: jsonb(),
+}, (table) => [
+	foreignKey({
+			columns: [table.createdById],
+			foreignColumns: [users.id],
+			name: "transformations_created_by_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.orgId],
+			foreignColumns: [orgs.id],
+			name: "transformations_org_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.updatedById],
+			foreignColumns: [users.id],
+			name: "transformations_updated_by_id_fkey"
+		}),
+	unique("transformations_org_id_position_key").on(table.orgId, table.position),
+	unique("transformations_org_id_name_key").on(table.orgId, table.name),
+]);
+
 export const orgUsers = pgTable("org_users", {
 	orgId: uuid("org_id").notNull(),
 	userId: uuid("user_id").notNull(),
@@ -180,37 +214,6 @@ export const rssFeeds = pgTable("rss_feeds", {
 			foreignColumns: [users.id],
 			name: "rss_feeds_updated_by_id_fkey"
 		}),
-]);
-
-export const transformations = pgTable("transformations", {
-	orgId: uuid("org_id").notNull(),
-	position: integer().default(0).notNull(),
-	type: text().notNull(),
-	model: text(),
-	prompt: text().notNull(),
-	params: jsonb(),
-	createdById: uuid("created_by_id"),
-	updatedById: uuid("updated_by_id"),
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	foreignKey({
-			columns: [table.createdById],
-			foreignColumns: [users.id],
-			name: "transformations_created_by_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.orgId],
-			foreignColumns: [orgs.id],
-			name: "transformations_org_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.updatedById],
-			foreignColumns: [users.id],
-			name: "transformations_updated_by_id_fkey"
-		}),
-	unique("transformations_org_id_position_key").on(table.orgId, table.position),
 ]);
 
 export const wikiPages = pgTable("wiki_pages", {

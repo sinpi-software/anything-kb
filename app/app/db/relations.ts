@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { users, appSettings, orgs, artifacts, orgSettings, orgUsers, rssFeeds, transformations, wikiPages, rssFeedItems, transformRuns, wikiPageVersions } from "./schema";
+import { users, appSettings, orgs, artifacts, orgSettings, transformations, orgUsers, rssFeeds, wikiPages, rssFeedItems, transformRuns, wikiPageVersions } from "./schema";
 
 export const usersRelations = relations(users, ({one, many}) => ({
 	user_createdById: one(users, {
@@ -36,6 +36,12 @@ export const usersRelations = relations(users, ({one, many}) => ({
 	orgSettings_updatedById: many(orgSettings, {
 		relationName: "orgSettings_updatedById_users_id"
 	}),
+	transformations_createdById: many(transformations, {
+		relationName: "transformations_createdById_users_id"
+	}),
+	transformations_updatedById: many(transformations, {
+		relationName: "transformations_updatedById_users_id"
+	}),
 	orgUsers_createdById: many(orgUsers, {
 		relationName: "orgUsers_createdById_users_id"
 	}),
@@ -50,12 +56,6 @@ export const usersRelations = relations(users, ({one, many}) => ({
 	}),
 	rssFeeds_updatedById: many(rssFeeds, {
 		relationName: "rssFeeds_updatedById_users_id"
-	}),
-	transformations_createdById: many(transformations, {
-		relationName: "transformations_createdById_users_id"
-	}),
-	transformations_updatedById: many(transformations, {
-		relationName: "transformations_updatedById_users_id"
 	}),
 	wikiPages_createdById: many(wikiPages, {
 		relationName: "wikiPages_createdById_users_id"
@@ -97,9 +97,9 @@ export const orgsRelations = relations(orgs, ({one, many}) => ({
 	}),
 	artifacts: many(artifacts),
 	orgSettings: many(orgSettings),
+	transformations: many(transformations),
 	orgUsers: many(orgUsers),
 	rssFeeds: many(rssFeeds),
-	transformations: many(transformations),
 	wikiPages: many(wikiPages),
 }));
 
@@ -131,6 +131,24 @@ export const orgSettingsRelations = relations(orgSettings, ({one}) => ({
 		references: [users.id],
 		relationName: "orgSettings_updatedById_users_id"
 	}),
+}));
+
+export const transformationsRelations = relations(transformations, ({one, many}) => ({
+	user_createdById: one(users, {
+		fields: [transformations.createdById],
+		references: [users.id],
+		relationName: "transformations_createdById_users_id"
+	}),
+	org: one(orgs, {
+		fields: [transformations.orgId],
+		references: [orgs.id]
+	}),
+	user_updatedById: one(users, {
+		fields: [transformations.updatedById],
+		references: [users.id],
+		relationName: "transformations_updatedById_users_id"
+	}),
+	transformRuns: many(transformRuns),
 }));
 
 export const orgUsersRelations = relations(orgUsers, ({one}) => ({
@@ -171,24 +189,6 @@ export const rssFeedsRelations = relations(rssFeeds, ({one, many}) => ({
 		relationName: "rssFeeds_updatedById_users_id"
 	}),
 	rssFeedItems: many(rssFeedItems),
-}));
-
-export const transformationsRelations = relations(transformations, ({one, many}) => ({
-	user_createdById: one(users, {
-		fields: [transformations.createdById],
-		references: [users.id],
-		relationName: "transformations_createdById_users_id"
-	}),
-	org: one(orgs, {
-		fields: [transformations.orgId],
-		references: [orgs.id]
-	}),
-	user_updatedById: one(users, {
-		fields: [transformations.updatedById],
-		references: [users.id],
-		relationName: "transformations_updatedById_users_id"
-	}),
-	transformRuns: many(transformRuns),
 }));
 
 export const wikiPagesRelations = relations(wikiPages, ({one, many}) => ({

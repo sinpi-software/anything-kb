@@ -39,12 +39,14 @@ describe("TransformationsPage", () => {
     await userEvent.click(expandButtons[0]);
     await screen.findByDisplayValue("Summarize the article");
 
-    const gateToggle = screen.getByRole("checkbox", { name: "Add gate" });
+    const gateToggle = screen.getByRole("checkbox", {
+      name: "Halt the chain unless this step's output meets a condition",
+    });
     await userEvent.click(gateToggle);
 
     expect(screen.getByPlaceholderText("field")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("value")).toBeInTheDocument();
-    // Two selects were already present (Type for each row); enabling the gate adds source + op.
-    expect(await screen.findAllByRole("combobox")).toHaveLength(4);
+    // Two selects were already present (Type for each row); enabling the gate adds the op select.
+    expect(await screen.findAllByRole("combobox")).toHaveLength(3);
   });
 });

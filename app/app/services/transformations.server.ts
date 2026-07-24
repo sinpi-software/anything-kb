@@ -1,4 +1,4 @@
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "~/db/client.server";
 import { transformations } from "~/db/schema";
 import type { TransformationInput } from "~/schemas/transformation";
@@ -9,21 +9,6 @@ export class TransformationValidationError extends Error {
   constructor(readonly field: string, message: string) {
     super(message);
     this.name = "TransformationValidationError";
-  }
-}
-
-async function assertGateSourceEarlier(
-  orgId: string,
-  position: number,
-  gate: TransformationInput["gate"],
-): Promise<void> {
-  if (!gate) return;
-  const earlier = await db
-    .select({ name: transformations.name })
-    .from(transformations)
-    .where(and(eq(transformations.orgId, orgId), lt(transformations.position, position)));
-  if (!earlier.some((t) => t.name === gate.source)) {
-    throw new TransformationValidationError("gate", `Gate source "${gate.source}" must be an earlier transform`);
   }
 }
 
@@ -52,8 +37,6 @@ export async function createTransformation(orgId: string, input: TransformationI
     .from(transformations)
     .where(eq(transformations.orgId, orgId));
 
-  await assertGateSourceEarlier(orgId, next, input.gate);
-
   try {
     const [row] = await db
       .insert(transformations)
@@ -78,14 +61,6 @@ export async function createTransformation(orgId: string, input: TransformationI
 }
 
 export async function updateTransformation(id: string, input: TransformationInput): Promise<TransformationRow | null> {
-  const [existing] = await db
-    .select({ orgId: transformations.orgId, position: transformations.position })
-    .from(transformations)
-    .where(eq(transformations.id, id));
-  if (!existing) return null;
-
-  await assertGateSourceEarlier(existing.orgId, existing.position, input.gate);
-
   try {
     const [row] = await db
       .update(transformations)

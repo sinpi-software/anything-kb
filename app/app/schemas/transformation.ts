@@ -13,8 +13,9 @@ export const llmParamsSchema = z
   .passthrough();
 
 export const GATE_OPS = ["eq", "ne", "gt", "gte", "lt", "lte", "in", "contains"] as const;
+// An outgoing gate: after a step runs, its own output is checked against this
+// condition; a closed gate halts the later steps in the chain.
 export const gateSchema = z.object({
-  source: z.string().min(1),
   field: z.string().min(1),
   op: z.enum(GATE_OPS),
   value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),

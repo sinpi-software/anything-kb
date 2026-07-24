@@ -41,7 +41,7 @@ describe("transformationInputSchema", () => {
   it("accepts a valid gate", () => {
     const r = transformationInputSchema.safeParse({
       ...valid,
-      gate: { source: "newsworthiness", field: "score", op: "gte", value: 5 },
+      gate: { field: "score", op: "gte", value: 5 },
     });
     expect(r.success).toBe(true);
   });
@@ -49,7 +49,7 @@ describe("transformationInputSchema", () => {
   it("rejects a bad gate op", () => {
     const r = transformationInputSchema.safeParse({
       ...valid,
-      gate: { source: "newsworthiness", field: "score", op: ">=", value: 5 },
+      gate: { field: "score", op: ">=", value: 5 },
     });
     expect(r.success).toBe(false);
   });

@@ -40,13 +40,13 @@ export async function loader({ params }: Route.LoaderArgs) {
   return { orgId: params.org_id, transformations: await listTransformations(params.org_id) };
 }
 
-type GateDraft = { source: string; field: string; op: string; value: string };
+type GateDraft = { field: string; op: string; value: string };
 type Draft = ReturnType<typeof toDraft>;
 
 function gateToDraft(gate: unknown): GateDraft | null {
   if (!gate || typeof gate !== "object") return null;
-  const { source, field, op, value } = gate as Record<string, unknown>;
-  return { source: String(source ?? ""), field: String(field ?? ""), op: String(op ?? GATE_OPS[0]), value: String(value ?? "") };
+  const { field, op, value } = gate as Record<string, unknown>;
+  return { field: String(field ?? ""), op: String(op ?? GATE_OPS[0]), value: String(value ?? "") };
 }
 
 function toDraft(row: TransformationRow) {
@@ -79,7 +79,7 @@ function buildPayload(draft: Draft): { ok: true; value: TransformationInput } | 
   }
   const params = { ...(paramsResult.value ?? {}), ...known };
   const gate = draft.gate
-    ? { source: draft.gate.source, field: draft.gate.field, op: draft.gate.op, value: coerceGateValue(draft.gate.value) }
+    ? { field: draft.gate.field, op: draft.gate.op, value: coerceGateValue(draft.gate.value) }
     : null;
   const candidate = {
     type: draft.type,
@@ -177,7 +177,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
             </TableHeader>
             <TableBody>
               {order.map((row) => (
-                <EditableRow key={row.id} row={row} transformations={order} />
+                <EditableRow key={row.id} row={row} />
               ))}
             </TableBody>
           </Table>
@@ -191,8 +191,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
 // the immediate variant since a discrete choice has no mid-edit state to debounce.
 const DEBOUNCED_AUTOSAVE_MS = 500;
 
-function EditableRow({ row, transformations }: { row: TransformationRow; transformations: TransformationRow[] }) {
-  const gateSourceOptions = transformations.filter((t) => t.position < row.position).map((t) => t.name);
+function EditableRow({ row }: { row: TransformationRow }) {
   const fetcher = useFetcher();
   const sortable = useSortable({ id: row.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
@@ -337,9 +336,7 @@ function EditableRow({ row, transformations }: { row: TransformationRow; transfo
               <div className="flex flex-col gap-1 md:col-span-2">
                 <span className="text-xs text-muted-foreground">Gate</span>
                 <form.Field name="gate" listeners={debounced}>
-                  {(field) => (
-                    <GateFields value={field.state.value} onChange={field.handleChange} sourceOptions={gateSourceOptions} />
-                  )}
+                  {(field) => <GateFields value={field.state.value} onChange={field.handleChange} />}
                 </form.Field>
               </div>
             </div>
@@ -354,11 +351,9 @@ function EditableRow({ row, transformations }: { row: TransformationRow; transfo
 function GateFields({
   value,
   onChange,
-  sourceOptions,
 }: {
   value: GateDraft | null;
   onChange: (next: GateDraft | null) => void;
-  sourceOptions: string[];
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -366,20 +361,12 @@ function GateFields({
         <input
           type="checkbox"
           checked={value !== null}
-          onChange={(e) =>
-            onChange(e.target.checked ? { source: sourceOptions[0] ?? "", field: "", op: GATE_OPS[0], value: "" } : null)
-          }
+          onChange={(e) => onChange(e.target.checked ? { field: "", op: GATE_OPS[0], value: "" } : null)}
         />
-        Add gate
+        Halt the chain unless this step's output meets a condition
       </label>
       {value && (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Select value={value.source} onValueChange={(source) => source && onChange({ ...value, source })}>
-            <SelectTrigger><SelectValue placeholder="source" /></SelectTrigger>
-            <SelectContent>
-              {sourceOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="grid grid-cols-3 gap-2">
           <Input value={value.field} onChange={(e) => onChange({ ...value, field: e.target.value })} placeholder="field" />
           <Select value={value.op} onValueChange={(op) => op && onChange({ ...value, op })}>
             <SelectTrigger><SelectValue /></SelectTrigger>

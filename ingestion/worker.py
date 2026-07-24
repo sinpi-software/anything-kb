@@ -1,5 +1,6 @@
+import logging
 import os
-import time
+import time as time  # re-exported so tests can monkeypatch worker.time.sleep
 from datetime import UTC, datetime
 
 import dotenv
@@ -99,7 +100,12 @@ def run_once() -> int:
 
 def main() -> None:
     while True:
-        if run_once() == 0:
+        try:
+            processed = run_once()
+        except Exception:
+            logging.getLogger("worker").exception("worker iteration failed; continuing")
+            processed = 0
+        if processed == 0:
             time.sleep(config.WORKER_POLL_INTERVAL_SECONDS)
 
 

@@ -123,6 +123,22 @@ def test_relevance_failure_retries_not_skips(monkeypatch: pytest.MonkeyPatch, or
         assert job is not None and job.attempts == 1
 
 
+def test_main_survives_run_once_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A raising run_once() (e.g. a DB blip during claim or job-load) must not kill main()'s
+    # poll loop. Force run_once() to raise, and make time.sleep() raise a sentinel so main()
+    # completes exactly one guarded iteration and exits via the sentinel instead of hanging.
+    def _boom() -> int:
+        raise RuntimeError("db exploded")
+
+    def _sleep_sentinel(_seconds: float) -> None:
+        raise StopIteration
+
+    monkeypatch.setattr(worker, "run_once", _boom)
+    monkeypatch.setattr(worker.time, "sleep", _sleep_sentinel)
+    with pytest.raises(StopIteration):
+        worker.main()
+
+
 @requires_pg
 def test_skip_locked_prevents_double_claim(org_with_config) -> None:  # type: ignore[no-untyped-def]
     from sqlalchemy import select

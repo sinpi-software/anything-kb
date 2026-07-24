@@ -1,0 +1,68 @@
+name: Deploy to k3s
+
+# Auto-deploy on push to main, or run manually. The GitHub-hosted runner reaches the
+# home node over the Cloudflare tunnel (cloudflared access ssh), then builds the image
+# and runs `pulumi up` ON the node — where the registry, k3s API, and Pulumi state live.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys run against the cluster at once.
+concurrency:
+  group: deploy-k3s
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Cloudflare Access service token that gates SSH through the tunnel.
+      TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cloudflared
+        run: |
+          # Pinned: service-token auth regressed in 2026.6.0; 2026.5.1 honors it.
+          ver=2026.5.1
+          curl -fsSL -o cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/download/${ver}/cloudflared-linux-amd64"
+          sudo install -m 0755 cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Configure SSH over the Cloudflare tunnel
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          cat > ~/.ssh/config <<'EOF'
+          Host node
+            HostName ssh.sinpi.software
+            User deployer
+            IdentityFile ~/.ssh/id_rsa
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+            ProxyCommand cloudflared access ssh --hostname %h
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Sync code to the node
+        run: |
+          # Push the checked-out tree to the node, preserving its persistent, node-local
+          # Pulumi state/config (stack config, passphrase, venv, kubeconfig never synced).
+          rsync -az --delete \
+            --exclude '.git' --exclude '.github' \
+            --exclude '**/.venv' --exclude 'deploy/venv' --exclude '**/node_modules' \
+            --exclude 'deploy/Pulumi.*.yaml' --exclude 'deploy/.passphrase' --exclude 'deploy/kubeconfig' \
+            --exclude '**/__pycache__' \
+            -e "ssh -F $HOME/.ssh/config" ./ node:anything-kb/
+
+      - name: Build + deploy on the node
+        run: |
+          # deploy.sh builds the image on the node -> local registry, then runs the
+          # migration Job (alembic) and rolls the pods via `pulumi up`.
+          ssh node "cd ~/anything-kb/deploy && ./deploy.sh home ${GITHUB_SHA::12}"

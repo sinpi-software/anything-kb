@@ -58,28 +58,12 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
-  build:
-    name: build + push image (GHCR)
+  image:
+    name: build check (Docker image)
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ingestion
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ghcr.io/sinpi-software/anything-kb:${{ github.sha }}
-            ghcr.io/sinpi-software/anything-kb:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # Validate the image builds; the real build+push happens on the node during deploy.
+      - name: Build ingestion image (no push)
+        run: docker build -t anything-ingestion:ci ingestion

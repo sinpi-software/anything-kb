@@ -101,20 +101,20 @@ def test_normalize_name() -> None:
     assert normalize_name("  Barack   Obama ") == "barack obama"
 
 
-def test_candidate_query_is_org_and_type_scoped() -> None:
-    query, params = candidate_query("org-1", "Person", "ada lovelace", 5)
-    assert "org_id" in query
-    assert params["org_id"] == "org-1"
+def test_candidate_query_is_knowledge_base_and_type_scoped() -> None:
+    query, params = candidate_query("knowledge_base-1", "Person", "ada lovelace", 5)
+    assert "knowledge_base_id" in query
+    assert params["knowledge_base_id"] == "knowledge_base-1"
     assert params["type"] == "Person"
     assert params["name_normalized"] == "ada lovelace"
     assert params["limit"] == 5
 
 
-def test_fulltext_candidate_query_is_org_and_type_scoped() -> None:
-    query, params = fulltext_candidate_query("org-1", "Person", "ada lovelace", 5)
-    assert "org_id" in query
+def test_fulltext_candidate_query_is_knowledge_base_and_type_scoped() -> None:
+    query, params = fulltext_candidate_query("knowledge_base-1", "Person", "ada lovelace", 5)
+    assert "knowledge_base_id" in query
     assert "type" in query
-    assert params["org_id"] == "org-1"
+    assert params["knowledge_base_id"] == "knowledge_base-1"
     assert params["type"] == "Person"
     assert params["q"] == "ada lovelace"
     assert params["limit"] == 5
@@ -186,7 +186,9 @@ def _resolution_entity() -> ExtractedEntity:
 
 
 def _resolve_batch(session: Any, client: Any) -> list[str | None]:
-    return knowledge_mod.resolve_entities_batch(session, client, "model", "org-1", [_resolution_entity()], {})
+    return knowledge_mod.resolve_entities_batch(
+        session, client, "model", "knowledge_base-1", [_resolution_entity()], {}
+    )
 
 
 def test_resolve_batch_multi_candidate_valid_answer_returns_id() -> None:
@@ -221,89 +223,102 @@ def test_resolve_batch_no_candidates_skips_llm() -> None:
     assert not client.chat.send_called
 
 
-def _cleanup(org_id: str) -> None:
+def _cleanup(knowledge_base_id: str) -> None:
     with get_neo4j_session() as session:
-        session.run("MATCH (n) WHERE n.org_id = $org_id DETACH DELETE n", {"org_id": org_id})
+        session.run(
+            "MATCH (n) WHERE n.knowledge_base_id = $knowledge_base_id DETACH DELETE n",
+            {"knowledge_base_id": knowledge_base_id},
+        )
 
 
 @requires_neo4j
 def test_upsert_and_relationship_roundtrip() -> None:
     bootstrap_schema()
-    org = f"test-{uuid.uuid4()}"
+    knowledge_base = f"test-{uuid.uuid4()}"
     a_id, b_id = str(uuid.uuid4()), str(uuid.uuid4())
     try:
         with get_neo4j_session() as session:
-            upsert_entity(session, org, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A")
-            upsert_entity(session, org, b_id, ExtractedEntity(name="Engine", type="Thing", description="d"), "sum B")
+            upsert_entity(
+                session, knowledge_base, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A"
+            )
+            upsert_entity(
+                session, knowledge_base, b_id, ExtractedEntity(name="Engine", type="Thing", description="d"), "sum B"
+            )
             # Re-upsert A with a new summary — must update, not duplicate.
-            upsert_entity(session, org, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A v2")
-            write_relationship(session, org, a_id, b_id, "WORKED_ON", "art-1")
-            write_provenance(session, org, a_id, "art-1")
+            upsert_entity(
+                session, knowledge_base, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A v2"
+            )
+            write_relationship(session, knowledge_base, a_id, b_id, "WORKED_ON", "art-1")
+            write_provenance(session, knowledge_base, a_id, "art-1")
 
-            count = session.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org}).single(True)["c"]
+            count = session.run(
+                "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c", {"o": knowledge_base}
+            ).single(True)["c"]
             assert count == 2  # no duplicate
             summ = session.run("MATCH (e:Entity {id: $id}) RETURN e.summary AS s", {"id": a_id}).single(True)["s"]
             assert summ == "sum A v2"
-            rels = session.run("MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": org}).single(
-                True
-            )["t"]
+            rels = session.run(
+                "MATCH (:Entity {knowledge_base_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": knowledge_base}
+            ).single(True)["t"]
             assert rels == "WORKED_ON"
     finally:
-        _cleanup(org)
+        _cleanup(knowledge_base)
 
 
 @requires_neo4j
-def test_org_isolation() -> None:
+def test_knowledge_base_isolation() -> None:
     bootstrap_schema()
-    org_a, org_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    knowledge_base_a, knowledge_base_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
     try:
         with get_neo4j_session() as session:
             ada = ExtractedEntity(name="Ada", type="Person", description="d")
-            upsert_entity(session, org_a, str(uuid.uuid4()), ada, "A")
-            upsert_entity(session, org_b, str(uuid.uuid4()), ada, "B")
-            a_count = session.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_a}).single(True)["c"]
-            assert a_count == 1  # org_b's identically-named entity is invisible to org_a
+            upsert_entity(session, knowledge_base_a, str(uuid.uuid4()), ada, "A")
+            upsert_entity(session, knowledge_base_b, str(uuid.uuid4()), ada, "B")
+            a_count = session.run(
+                "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c", {"o": knowledge_base_a}
+            ).single(True)["c"]
+            assert a_count == 1  # knowledge_base_b's identically-named entity is invisible to knowledge_base_a
     finally:
-        _cleanup(org_a)
-        _cleanup(org_b)
+        _cleanup(knowledge_base_a)
+        _cleanup(knowledge_base_b)
 
 
 @requires_neo4j
-def test_fulltext_candidate_query_matches_name_variants_and_is_org_scoped() -> None:
+def test_fulltext_candidate_query_matches_name_variants_and_is_knowledge_base_scoped() -> None:
     """Proves the `entity_name` full-text index (from bootstrap_schema) is actually wired
-    into candidate lookup: two differently-named-but-related entities in the same org both
-    surface for a shared-token query, while a same-token entity in a different org does not."""
+    into candidate lookup: two differently-named-but-related entities in the same knowledge_base both
+    surface for a shared-token query, while a same-token entity in a different knowledge_base does not."""
     bootstrap_schema()
-    org_a, org_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    knowledge_base_a, knowledge_base_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
     try:
         with get_neo4j_session() as session:
             upsert_entity(
                 session,
-                org_a,
+                knowledge_base_a,
                 str(uuid.uuid4()),
                 ExtractedEntity(name="Barack Obama", type="Person", description="d"),
                 "s1",
             )
             upsert_entity(
                 session,
-                org_a,
+                knowledge_base_a,
                 str(uuid.uuid4()),
                 ExtractedEntity(name="President Obama", type="Person", description="d"),
                 "s2",
             )
             upsert_entity(
                 session,
-                org_b,
+                knowledge_base_b,
                 str(uuid.uuid4()),
                 ExtractedEntity(name="Obama Fried Chicken", type="Person", description="d"),
                 "s3",
             )
-            query, params = fulltext_candidate_query(org_a, "Person", "Obama", 5)
+            query, params = fulltext_candidate_query(knowledge_base_a, "Person", "Obama", 5)
             names = {r["name"] for r in session.run(query, params)}
-            assert names == {"Barack Obama", "President Obama"}  # both org_a variants found
+            assert names == {"Barack Obama", "President Obama"}  # both knowledge_base_a variants found
     finally:
-        _cleanup(org_a)
-        _cleanup(org_b)
+        _cleanup(knowledge_base_a)
+        _cleanup(knowledge_base_b)
 
 
 @requires_neo4j_and_postgres
@@ -334,27 +349,31 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
 
     monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
 
-    org_id = f"merge-{uuid.uuid4()}"
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
     job_id = str(uuid.uuid4())
     try:
-        result = merge_content(org_id, "Ada worked on the Engine.", ["Person", "Thing"], ["WORKED_ON"], job_id)
+        result = merge_content(
+            knowledge_base_id, "Ada worked on the Engine.", ["Person", "Thing"], ["WORKED_ON"], job_id
+        )
         assert isinstance(result, MergeResult)
         assert result.entities_created == 2  # Rover filtered
         assert result.relationships_created == 1  # HATES filtered
         with get_neo4j_session() as neo:
-            ecount = neo.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_id}).single(True)["c"]
+            ecount = neo.run(
+                "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c", {"o": knowledge_base_id}
+            ).single(True)["c"]
             assert ecount == 2
             rel = neo.run(
-                "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t, r.source_job_id AS j",
-                {"o": org_id},
+                "MATCH (:Entity {knowledge_base_id: $o})-[r:RELATED]->() RETURN r.type AS t, r.source_job_id AS j",
+                {"o": knowledge_base_id},
             ).single(True)
             assert rel["t"] == "WORKED_ON"
             assert rel["j"] == job_id
             src = neo.run(
-                "MATCH (:Entity {org_id: $o})-[:MENTIONED_IN]->(s:Source) RETURN s.job_id AS j LIMIT 1",
-                {"o": org_id},
+                "MATCH (:Entity {knowledge_base_id: $o})-[:MENTIONED_IN]->(s:Source) RETURN s.job_id AS j LIMIT 1",
+                {"o": knowledge_base_id},
             ).single(True)
             assert src["j"] == job_id
     finally:
         with get_neo4j_session() as neo:
-            neo.run("MATCH (n) WHERE n.org_id = $o DETACH DELETE n", {"o": org_id})
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})

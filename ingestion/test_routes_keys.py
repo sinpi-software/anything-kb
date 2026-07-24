@@ -28,20 +28,23 @@ LOCALHOST_ORIGIN = {"Origin": "http://localhost:5173"}
 
 def _purge_user(email: str) -> None:
     from db import get_postgres_session
-    from models import ApiKey, AuthSession, EmailToken, Org, OrgUser, User
+    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseUser, User
 
     with get_postgres_session() as s:
         user = s.query(User).filter(User.email == email).one_or_none()
         if user is None:
             return
-        org_ids = [row[0] for row in s.query(OrgUser.org_id).filter(OrgUser.user_id == user.id).all()]
-        if org_ids:
-            s.query(ApiKey).filter(ApiKey.org_id.in_(org_ids)).delete(synchronize_session=False)
+        knowledge_base_ids = [
+            row[0]
+            for row in s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).all()
+        ]
+        if knowledge_base_ids:
+            s.query(ApiKey).filter(ApiKey.knowledge_base_id.in_(knowledge_base_ids)).delete(synchronize_session=False)
         s.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
         s.query(EmailToken).filter(EmailToken.user_id == user.id).delete(synchronize_session=False)
-        s.query(OrgUser).filter(OrgUser.user_id == user.id).delete(synchronize_session=False)
-        if org_ids:
-            s.query(Org).filter(Org.id.in_(org_ids)).delete(synchronize_session=False)
+        s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).delete(synchronize_session=False)
+        if knowledge_base_ids:
+            s.query(KnowledgeBase).filter(KnowledgeBase.id.in_(knowledge_base_ids)).delete(synchronize_session=False)
         s.query(User).filter(User.id == user.id).delete(synchronize_session=False)
         s.commit()
 
@@ -102,9 +105,9 @@ def test_create_key_requires_csrf_origin(client: TestClient) -> None:
 
 @requires_pg
 def test_create_key_is_201_when_verified_and_key_authenticates_against_engine(client: TestClient) -> None:
-    from auth import hash_key, resolve_org
+    from auth import hash_key, resolve_knowledge_base
     from db import get_postgres_session
-    from models import ApiKey, OrgUser, User
+    from models import ApiKey, KnowledgeBaseUser, User
 
     email = _unique_email()
     try:
@@ -124,10 +127,12 @@ def test_create_key_is_201_when_verified_and_key_authenticates_against_engine(cl
             assert row.key_hash == hash_key(raw_key)
 
             user = s.query(User).filter(User.email == email).one()
-            org_id = s.query(OrgUser.org_id).filter(OrgUser.user_id == user.id).scalar()
+            knowledge_base_id = (
+                s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).scalar()
+            )
 
-        # the engine's Bearer auth (resolve_org) accepts the freshly minted key unchanged
-        assert resolve_org(raw_key) == str(org_id)
+        # the engine's Bearer auth (resolve_knowledge_base) accepts the freshly minted key unchanged
+        assert resolve_knowledge_base(raw_key) == str(knowledge_base_id)
     finally:
         _purge_user(email)
 
@@ -158,7 +163,7 @@ def test_list_keys_never_leaks_raw_key_or_hash(client: TestClient) -> None:
 
 @requires_pg
 def test_revoke_key_stops_it_from_resolving(client: TestClient) -> None:
-    from auth import resolve_org
+    from auth import resolve_knowledge_base
 
     email = _unique_email()
     try:
@@ -166,7 +171,7 @@ def test_revoke_key_stops_it_from_resolving(client: TestClient) -> None:
         create = client.post("/api/keys", json={"name": "revoke-me"}, headers=LOCALHOST_ORIGIN)
         key_id = create.json()["id"]
         raw_key = create.json()["key"]
-        assert resolve_org(raw_key)  # works before revocation
+        assert resolve_knowledge_base(raw_key)  # works before revocation
 
         revoke = client.delete(f"/api/keys/{key_id}", headers=LOCALHOST_ORIGIN)
         assert revoke.status_code == 204
@@ -174,7 +179,7 @@ def test_revoke_key_stops_it_from_resolving(client: TestClient) -> None:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
-            resolve_org(raw_key)
+            resolve_knowledge_base(raw_key)
         assert exc.value.status_code == 401
 
         listing = client.get("/api/keys").json()

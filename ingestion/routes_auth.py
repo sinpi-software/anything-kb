@@ -23,12 +23,12 @@ from accounts import (
     verify_password,
 )
 from db import get_postgres_session
-from models import AuthSession, Org, OrgUser, OrgUserRole, User
+from models import AuthSession, KnowledgeBase, KnowledgeBaseUser, KnowledgeBaseUserRole, User
 from schemas import (
     ForgotPasswordRequest,
+    KnowledgeBaseMembership,
     LoginRequest,
     MeResponse,
-    OrgMembership,
     RegisterRequest,
     ResetPasswordRequest,
     TokenRequest,
@@ -41,10 +41,10 @@ MIN_PASSWORD_LENGTH = 8
 
 def _me_payload(session: OrmSession, user: User) -> MeResponse:
     rows = (
-        session.query(OrgUser.org_id, Org.name, OrgUser.role)
-        .join(Org, Org.id == OrgUser.org_id)
-        .filter(OrgUser.user_id == user.id)
-        .order_by(Org.name)
+        session.query(KnowledgeBaseUser.knowledge_base_id, KnowledgeBase.name, KnowledgeBaseUser.role)
+        .join(KnowledgeBase, KnowledgeBase.id == KnowledgeBaseUser.knowledge_base_id)
+        .filter(KnowledgeBaseUser.user_id == user.id)
+        .order_by(KnowledgeBase.name)
         .all()
     )
     return MeResponse(
@@ -53,7 +53,10 @@ def _me_payload(session: OrmSession, user: User) -> MeResponse:
         name=user.name,
         email_verified=user.email_verified,
         is_admin=user.is_admin,
-        orgs=[OrgMembership(org_id=str(org_id), org_name=name, role=role) for org_id, name, role in rows],
+        knowledge_bases=[
+            KnowledgeBaseMembership(knowledge_base_id=str(knowledge_base_id), knowledge_base_name=name, role=role)
+            for knowledge_base_id, name, role in rows
+        ],
     )
 
 
@@ -74,7 +77,7 @@ def _send_verification_email(session: OrmSession, user: User) -> None:
     "/register", response_model=MeResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_csrf)]
 )
 def register(payload: RegisterRequest, response: Response) -> MeResponse:
-    """Create a user, auto-create an org owned by them (so they immediately have
+    """Create a user, auto-create an knowledge_base owned by them (so they immediately have
     somewhere to hold API keys), log them in, and best-effort send a verification email."""
     email = payload.email.strip().lower()
     if not email or len(payload.password) < MIN_PASSWORD_LENGTH:
@@ -96,15 +99,15 @@ def register(payload: RegisterRequest, response: Response) -> MeResponse:
         user.created_by_id = user.id
         user.updated_by_id = user.id
 
-        org_name = (payload.org_name or "").strip() or "My workspace"
-        org = Org(name=org_name, created_by_id=user.id, updated_by_id=user.id)
-        session.add(org)
+        knowledge_base_name = (payload.knowledge_base_name or "").strip() or "My workspace"
+        knowledge_base = KnowledgeBase(name=knowledge_base_name, created_by_id=user.id, updated_by_id=user.id)
+        session.add(knowledge_base)
         session.flush()
         session.add(
-            OrgUser(
-                org_id=org.id,
+            KnowledgeBaseUser(
+                knowledge_base_id=knowledge_base.id,
                 user_id=user.id,
-                role=OrgUserRole.OWNER.value,
+                role=KnowledgeBaseUserRole.OWNER.value,
                 created_by_id=user.id,
                 updated_by_id=user.id,
             )

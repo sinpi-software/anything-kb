@@ -28,20 +28,23 @@ LOCALHOST_ORIGIN = {"Origin": "http://localhost:5173"}
 
 def _purge_user(email: str) -> None:
     from db import get_postgres_session
-    from models import ApiKey, AuthSession, EmailToken, Org, OrgUser, User
+    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseUser, User
 
     with get_postgres_session() as s:
         user = s.query(User).filter(User.email == email).one_or_none()
         if user is None:
             return
-        org_ids = [row[0] for row in s.query(OrgUser.org_id).filter(OrgUser.user_id == user.id).all()]
-        if org_ids:
-            s.query(ApiKey).filter(ApiKey.org_id.in_(org_ids)).delete(synchronize_session=False)
+        knowledge_base_ids = [
+            row[0]
+            for row in s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).all()
+        ]
+        if knowledge_base_ids:
+            s.query(ApiKey).filter(ApiKey.knowledge_base_id.in_(knowledge_base_ids)).delete(synchronize_session=False)
         s.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
         s.query(EmailToken).filter(EmailToken.user_id == user.id).delete(synchronize_session=False)
-        s.query(OrgUser).filter(OrgUser.user_id == user.id).delete(synchronize_session=False)
-        if org_ids:
-            s.query(Org).filter(Org.id.in_(org_ids)).delete(synchronize_session=False)
+        s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).delete(synchronize_session=False)
+        if knowledge_base_ids:
+            s.query(KnowledgeBase).filter(KnowledgeBase.id.in_(knowledge_base_ids)).delete(synchronize_session=False)
         s.query(User).filter(User.id == user.id).delete(synchronize_session=False)
         s.commit()
 
@@ -64,7 +67,7 @@ def _unique_email() -> str:
 
 
 @requires_pg
-def test_register_sets_cookie_and_me_returns_user_and_org(client: TestClient) -> None:
+def test_register_sets_cookie_and_me_returns_user_and_knowledge_base(client: TestClient) -> None:
     email = _unique_email()
     try:
         resp = client.post("/api/auth/register", json={"email": email, "password": "hunter22", "name": "Ada"})
@@ -72,25 +75,25 @@ def test_register_sets_cookie_and_me_returns_user_and_org(client: TestClient) ->
         body = resp.json()
         assert body["email"] == email
         assert body["email_verified"] is False
-        assert len(body["orgs"]) == 1
-        assert body["orgs"][0]["role"] == "owner"
+        assert len(body["knowledge_bases"]) == 1
+        assert body["knowledge_bases"][0]["role"] == "owner"
         assert "session" in resp.cookies
 
         me = client.get("/api/auth/me")
         assert me.status_code == 200
         assert me.json()["email"] == email
-        assert me.json()["orgs"][0]["org_id"] == body["orgs"][0]["org_id"]
+        assert me.json()["knowledge_bases"][0]["knowledge_base_id"] == body["knowledge_bases"][0]["knowledge_base_id"]
     finally:
         _purge_user(email)
 
 
 @requires_pg
-def test_register_lowercases_and_defaults_org_name(client: TestClient) -> None:
+def test_register_lowercases_and_defaults_knowledge_base_name(client: TestClient) -> None:
     email = _unique_email()
     try:
         resp = client.post("/api/auth/register", json={"email": email.upper(), "password": "hunter22"})
         assert resp.status_code == 201
-        assert resp.json()["orgs"][0]["org_name"] == "My workspace"
+        assert resp.json()["knowledge_bases"][0]["knowledge_base_name"] == "My workspace"
     finally:
         _purge_user(email)
 

@@ -22,8 +22,8 @@ def hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def resolve_org(token: str | None) -> str:
-    """Resolve an API-key token to its org id. Raises 401 if missing, unknown, or revoked."""
+def resolve_knowledge_base(token: str | None) -> str:
+    """Resolve an API-key token to its knowledge_base id. Raises 401 if missing, unknown, or revoked."""
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     with get_postgres_session() as session:
@@ -32,9 +32,9 @@ def resolve_org(token: str | None) -> str:
         )
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid api key")
-    return str(row.org_id)
+    return str(row.knowledge_base_id)
 
 
-def require_org(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:  # noqa: B008 — FastAPI dependency idiom
-    """FastAPI dependency: the caller's org id, resolved from the Bearer API key."""
-    return resolve_org(creds.credentials if creds else None)
+def require_knowledge_base(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:  # noqa: B008 — FastAPI dependency idiom
+    """FastAPI dependency: the caller's knowledge_base id, resolved from the Bearer API key."""
+    return resolve_knowledge_base(creds.credentials if creds else None)

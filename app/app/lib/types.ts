@@ -1,6 +1,6 @@
-export interface OrgMembership {
-  org_id: string;
-  org_name: string;
+export interface KnowledgeBaseMembership {
+  knowledge_base_id: string;
+  knowledge_base_name: string;
   role: string;
 }
 
@@ -10,7 +10,7 @@ export interface Me {
   name: string | null;
   email_verified: boolean;
   is_admin: boolean;
-  orgs: OrgMembership[];
+  knowledge_bases: KnowledgeBaseMembership[];
 }
 
 export interface ApiKey {

@@ -29,7 +29,7 @@ def seed_database() -> None:
     from argon2 import PasswordHasher
 
     from db import get_postgres_session
-    from models import Org, OrgUser, OrgUserRole, User
+    from models import KnowledgeBase, KnowledgeBaseUser, KnowledgeBaseUserRole, User
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
@@ -52,46 +52,50 @@ def seed_database() -> None:
             admin.updated_by_id = admin.id
         audit = {"created_by": admin, "updated_by": admin}
 
-        org, org_created = get_or_create(
+        knowledge_base, org_created = get_or_create(
             session,
-            Org,
-            defaults=dict(charter="This is the default organization.", **audit),
-            name="Default Organization",
+            KnowledgeBase,
+            defaults=dict(charter="This is the default knowledge base.", **audit),
+            name="Default Knowledge Base",
         )
         _membership, membership_created = get_or_create(
             session,
-            OrgUser,
-            defaults=dict(role=OrgUserRole.OWNER.value, **audit),
-            org_id=org.id,
+            KnowledgeBaseUser,
+            defaults=dict(role=KnowledgeBaseUserRole.OWNER.value, **audit),
+            knowledge_base_id=knowledge_base.id,
             user_id=admin.id,
         )
 
         from auth import generate_api_key, hash_key
-        from models import ApiKey, OrgConfig
+        from models import ApiKey, KnowledgeBaseConfig
 
         _cfg, config_created = get_or_create(
             session,
-            OrgConfig,
+            KnowledgeBaseConfig,
             defaults={
                 "relevance_prompt": "Is this content about technology, science, or business news?",
                 "entity_types": ["Person", "Organization", "Place", "Topic"],
                 "relationship_types": ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "FOUNDED"],
             },
-            org_id=org.id,
+            knowledge_base_id=knowledge_base.id,
         )
 
-        existing_key = session.query(ApiKey).filter(ApiKey.org_id == org.id, ApiKey.revoked_at.is_(None)).first()
+        existing_key = (
+            session.query(ApiKey)
+            .filter(ApiKey.knowledge_base_id == knowledge_base.id, ApiKey.revoked_at.is_(None))
+            .first()
+        )
         if existing_key is None:
             api_key_plaintext = generate_api_key()
-            session.add(ApiKey(org_id=org.id, key_hash=hash_key(api_key_plaintext)))
+            session.add(ApiKey(knowledge_base_id=knowledge_base.id, key_hash=hash_key(api_key_plaintext)))
 
         session.commit()
 
     for label, created in [
         (f"admin user {admin_email!r}", admin_created),
-        ("default org", org_created),
-        ("org membership", membership_created),
-        ("org config", config_created),
+        ("default knowledge_base", org_created),
+        ("knowledge_base membership", membership_created),
+        ("knowledge_base config", config_created),
     ]:
         print(f"  {'created' if created else 'exists '}  {label}")
     if api_key_plaintext is not None:

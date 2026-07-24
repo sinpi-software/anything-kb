@@ -11,9 +11,9 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import text as sqlalchemy_text
 
-from auth import generate_api_key, hash_key, require_org, resolve_org
+from auth import generate_api_key, hash_key, require_knowledge_base, resolve_knowledge_base
 from db import get_postgres_session
-from models import ApiKey, Org
+from models import ApiKey, KnowledgeBase
 
 
 def _postgres_available() -> bool:
@@ -42,60 +42,62 @@ def test_hash_key_is_deterministic_and_hex() -> None:
     assert hash_key(key) != hash_key("other-key")
 
 
-def test_resolve_org_rejects_missing_token() -> None:
+def test_resolve_knowledge_base_rejects_missing_token() -> None:
     for missing in (None, ""):
         with pytest.raises(HTTPException) as exc:
-            resolve_org(missing)
+            resolve_knowledge_base(missing)
         assert exc.value.status_code == 401
 
 
-def test_require_org_dependency_rejects_no_credentials() -> None:
+def test_require_knowledge_base_dependency_rejects_no_credentials() -> None:
     # HTTPBearer yields None for a missing / non-Bearer header; the dependency 401s.
     with pytest.raises(HTTPException) as exc:
-        require_org(creds=None)
+        require_knowledge_base(creds=None)
     assert exc.value.status_code == 401
 
 
 @requires_postgres
-def test_resolve_org_rejects_unknown_key() -> None:
+def test_resolve_knowledge_base_rejects_unknown_key() -> None:
     with pytest.raises(HTTPException) as exc:
-        resolve_org(generate_api_key())
+        resolve_knowledge_base(generate_api_key())
     assert exc.value.status_code == 401
 
 
 @pytest.fixture
-def seeded_org() -> Iterator[Org]:
+def seeded_knowledge_base() -> Iterator[KnowledgeBase]:
     with get_postgres_session() as session:
-        org = Org(name=f"test-org-{uuid.uuid4()}")
-        session.add(org)
+        knowledge_base = KnowledgeBase(name=f"test-knowledge_base-{uuid.uuid4()}")
+        session.add(knowledge_base)
         session.commit()
-        session.refresh(org)
-        yield org
-        session.query(ApiKey).filter(ApiKey.org_id == org.id).delete()
-        session.query(Org).filter(Org.id == org.id).delete()
+        session.refresh(knowledge_base)
+        yield knowledge_base
+        session.query(ApiKey).filter(ApiKey.knowledge_base_id == knowledge_base.id).delete()
+        session.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base.id).delete()
         session.commit()
 
 
 @requires_postgres
-def test_resolves_valid_key_to_org_id(seeded_org: Org) -> None:
+def test_resolves_valid_key_to_knowledge_base_id(seeded_knowledge_base: KnowledgeBase) -> None:
     key = generate_api_key()
     with get_postgres_session() as session:
-        session.add(ApiKey(org_id=seeded_org.id, key_hash=hash_key(key)))
+        session.add(ApiKey(knowledge_base_id=seeded_knowledge_base.id, key_hash=hash_key(key)))
         session.commit()
 
-    assert resolve_org(key) == str(seeded_org.id)
+    assert resolve_knowledge_base(key) == str(seeded_knowledge_base.id)
     # and through the FastAPI dependency, with real Bearer credentials
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=key)
-    assert require_org(creds=creds) == str(seeded_org.id)
+    assert require_knowledge_base(creds=creds) == str(seeded_knowledge_base.id)
 
 
 @requires_postgres
-def test_resolve_org_rejects_revoked_key(seeded_org: Org) -> None:
+def test_resolve_knowledge_base_rejects_revoked_key(seeded_knowledge_base: KnowledgeBase) -> None:
     key = generate_api_key()
     with get_postgres_session() as session:
-        session.add(ApiKey(org_id=seeded_org.id, key_hash=hash_key(key), revoked_at=datetime.now(UTC)))
+        session.add(
+            ApiKey(knowledge_base_id=seeded_knowledge_base.id, key_hash=hash_key(key), revoked_at=datetime.now(UTC))
+        )
         session.commit()
 
     with pytest.raises(HTTPException) as exc:
-        resolve_org(key)
+        resolve_knowledge_base(key)
     assert exc.value.status_code == 401

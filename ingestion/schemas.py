@@ -27,7 +27,7 @@ class ConfigRequest(BaseModel):
 
 
 class ConfigResponse(BaseModel):
-    org_id: str
+    knowledge_base_id: str
     relevance_prompt: str
     entity_types: list[str]
     relationship_types: list[str]
@@ -40,8 +40,8 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     name: str | None = None
-    # Name for the org auto-created for this user. Defaults to "My workspace".
-    org_name: str | None = None
+    # Name for the knowledge_base auto-created for this user. Defaults to "My workspace".
+    knowledge_base_name: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -62,9 +62,9 @@ class ResetPasswordRequest(BaseModel):
     password: str
 
 
-class OrgMembership(BaseModel):
-    org_id: str
-    org_name: str
+class KnowledgeBaseMembership(BaseModel):
+    knowledge_base_id: str
+    knowledge_base_name: str
     role: str
 
 
@@ -74,7 +74,7 @@ class MeResponse(BaseModel):
     name: str | None
     email_verified: bool
     is_admin: bool
-    orgs: list[OrgMembership]
+    knowledge_bases: list[KnowledgeBaseMembership]
 
 
 # --- API keys ----------------------------------------------------------------

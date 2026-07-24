@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 import config as config  # re-exported so tests can monkeypatch worker.config.WORKER_*
 from db import get_postgres_session
 from knowledge import merge_content
-from models import IngestJob, JobStatus, OrgConfig
+from models import IngestJob, JobStatus, KnowledgeBaseConfig
 from neo4j_client import bootstrap_schema
 from relevance import judge_relevance
 
@@ -45,9 +45,13 @@ def process_job(job_id: str) -> None:
         job = session.get(IngestJob, job_id)
         if job is None:
             return
-        org_id = str(job.org_id)
+        knowledge_base_id = str(job.knowledge_base_id)
         content = job.content
-        cfg = session.query(OrgConfig).filter(OrgConfig.org_id == org_id).one_or_none()
+        cfg = (
+            session.query(KnowledgeBaseConfig)
+            .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
+            .one_or_none()
+        )
         relevance_prompt = cfg.relevance_prompt if cfg else ""
         entity_types = list(cfg.entity_types) if cfg else []
         relationship_types = list(cfg.relationship_types) if cfg else []
@@ -57,7 +61,7 @@ def process_job(job_id: str) -> None:
         if not verdict.relevant:
             _finalize(job_id, JobStatus.SKIPPED, relevance_reason=verdict.reason)
             return
-        merge_content(org_id, content, entity_types, relationship_types, job_id)
+        merge_content(knowledge_base_id, content, entity_types, relationship_types, job_id)
         _finalize(job_id, JobStatus.DONE, relevance_reason=verdict.reason)
     except Exception as exc:
         _record_failure(job_id, str(exc))

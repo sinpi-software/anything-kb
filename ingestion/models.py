@@ -28,7 +28,7 @@ class Base(DeclarativeBase):
         return {c.key: getattr(self, c.key) for c in inspect(self).mapper.column_attrs}
 
 
-class OrgUserRole(Enum):
+class KnowledgeBaseUserRole(Enum):
     OWNER = "owner"
     ADMIN = "admin"
     EDITOR = "editor"
@@ -82,8 +82,8 @@ class User(_AuthoredModel):
     is_admin: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, server_default=false())
 
 
-class Org(_AuthoredModel):
-    __tablename__ = "orgs"
+class KnowledgeBase(_AuthoredModel):
+    __tablename__ = "knowledge_bases"
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     charter: Mapped[str] = mapped_column(TEXT, nullable=True)
 
@@ -96,11 +96,11 @@ class JobStatus(Enum):
     FAILED = "failed"
 
 
-class OrgConfig(_BaseModel):
-    __tablename__ = "org_configs"
-    __table_args__ = (UniqueConstraint("org_id"),)
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref=backref("config", uselist=False))
+class KnowledgeBaseConfig(_BaseModel):
+    __tablename__ = "knowledge_base_configs"
+    __table_args__ = (UniqueConstraint("knowledge_base_id"),)
+    knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
+    knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref=backref("config", uselist=False))
     relevance_prompt: Mapped[str] = mapped_column(TEXT, nullable=False)
     entity_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
     relationship_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
@@ -108,8 +108,8 @@ class OrgConfig(_BaseModel):
 
 class ApiKey(_BaseModel):
     __tablename__ = "api_keys"
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="api_keys")
+    knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
+    knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref="api_keys")
     key_hash: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
     revoked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     name: Mapped[str | None] = mapped_column(TEXT, nullable=True)
@@ -143,8 +143,8 @@ class EmailToken(_BaseModel):
 
 class IngestJob(_BaseModel):
     __tablename__ = "ingest_jobs"
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="ingest_jobs")
+    knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
+    knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref="ingest_jobs")
     content: Mapped[str] = mapped_column(TEXT, nullable=False)
     # `metadata` is reserved on Declarative classes, so the attribute is job_metadata.
     job_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
@@ -155,10 +155,10 @@ class IngestJob(_BaseModel):
     processed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
-class OrgUser(_AuthoredModel):
-    __tablename__ = "org_users"
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+class KnowledgeBaseUser(_AuthoredModel):
+    __tablename__ = "knowledge_base_users"
+    knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="users")
-    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], backref="orgs")
+    knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref="users")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], backref="knowledge_bases")
     role: Mapped[str] = mapped_column(TEXT, nullable=False)  # e.g., 'admin', 'member', etc.

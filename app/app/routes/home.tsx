@@ -138,7 +138,7 @@ const TIERS = [
     name: "Free",
     tag: "For your first graph.",
     specs: [
-      ["1", "organization"],
+      ["1", "knowledge base"],
       ["1,000", "ingestions / month"],
       ["3", "entity types"],
       ["3", "relationship types"],
@@ -150,7 +150,7 @@ const TIERS = [
     name: "Pro",
     tag: "For a working knowledge base.",
     specs: [
-      ["10", "organizations"],
+      ["10", "knowledge bases"],
       ["10,000", "ingestions / month"],
       ["Unlimited", "entity types"],
       ["Unlimited", "relationship types"],
@@ -162,7 +162,7 @@ const TIERS = [
     name: "Enterprise",
     tag: "For scale and isolation on your terms.",
     specs: [
-      ["Unlimited", "organizations"],
+      ["Unlimited", "knowledge bases"],
       ["Custom", "ingestion volume"],
       ["Unlimited", "entity types"],
       ["Unlimited", "relationship types"],

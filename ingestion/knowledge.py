@@ -114,32 +114,49 @@ def extract_knowledge(
     return KnowledgeExtraction.model_validate_json(content)
 
 
-def candidate_query(org_id: str, entity_type: str, name_normalized: str, limit: int) -> tuple[str, dict[str, Any]]:
+def candidate_query(
+    knowledge_base_id: str, entity_type: str, name_normalized: str, limit: int
+) -> tuple[str, dict[str, Any]]:
     query = (
-        "MATCH (e:Entity {org_id: $org_id, type: $type}) "
+        "MATCH (e:Entity {knowledge_base_id: $knowledge_base_id, type: $type}) "
         "WHERE e.name_normalized = $name_normalized OR $name_normalized IN e.aliases "
         "RETURN e.id AS id, e.name AS name, e.summary AS summary LIMIT $limit"
     )
-    return query, {"org_id": org_id, "type": entity_type, "name_normalized": name_normalized, "limit": limit}
+    return query, {
+        "knowledge_base_id": knowledge_base_id,
+        "type": entity_type,
+        "name_normalized": name_normalized,
+        "limit": limit,
+    }
 
 
-def fulltext_candidate_query(org_id: str, entity_type: str, query_text: str, limit: int) -> tuple[str, dict[str, Any]]:
-    # queryNodes spans every org, so this org_id/type filter is the tenant boundary.
+def fulltext_candidate_query(
+    knowledge_base_id: str, entity_type: str, query_text: str, limit: int
+) -> tuple[str, dict[str, Any]]:
+    # queryNodes spans every knowledge_base, so this knowledge_base_id/type filter is the tenant boundary.
     query = (
         "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score "
-        "WHERE e.org_id = $org_id AND e.type = $type "
+        "WHERE e.knowledge_base_id = $knowledge_base_id AND e.type = $type "
         "RETURN e.id AS id, e.name AS name, e.summary AS summary ORDER BY score DESC LIMIT $limit"
     )
-    return query, {"q": escape_lucene(query_text), "org_id": org_id, "type": entity_type, "limit": limit}
+    return query, {
+        "q": escape_lucene(query_text),
+        "knowledge_base_id": knowledge_base_id,
+        "type": entity_type,
+        "limit": limit,
+    }
 
 
-def _gather_candidates(session: Session, org_id: str, entity: ExtractedEntity, limit: int) -> list[dict[str, Any]]:
+def _gather_candidates(
+    session: Session, knowledge_base_id: str, entity: ExtractedEntity, limit: int
+) -> list[dict[str, Any]]:
     candidates = [
-        dict(r) for r in session.run(*candidate_query(org_id, entity.type, normalize_name(entity.name), limit))
+        dict(r)
+        for r in session.run(*candidate_query(knowledge_base_id, entity.type, normalize_name(entity.name), limit))
     ]
     seen = {c["id"] for c in candidates}
     try:  # full-text catches name variants; a bad query just adds nothing
-        for r in session.run(*fulltext_candidate_query(org_id, entity.type, entity.name, limit)):
+        for r in session.run(*fulltext_candidate_query(knowledge_base_id, entity.type, entity.name, limit)):
             if r["id"] not in seen:
                 candidates.append(dict(r))
                 seen.add(r["id"])
@@ -161,14 +178,14 @@ def resolve_entities_batch(
     session: Session,
     client: OpenRouter,
     model: str,
-    org_id: str,
+    knowledge_base_id: str,
     entities: list[ExtractedEntity],
     llm_params: dict[str, Any],
 ) -> list[str | None]:
     """For each entity, the id of the existing entity it refers to, or None if new. Entities with
     0 or 1 candidates need no LLM; the ambiguous rest are resolved in a single batched call."""
     limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
-    candidates = [_gather_candidates(session, org_id, e, limit) for e in entities]
+    candidates = [_gather_candidates(session, knowledge_base_id, e, limit) for e in entities]
     resolved: list[str | None] = []
     ambiguous: list[int] = []
     for i, cands in enumerate(candidates):
@@ -224,15 +241,17 @@ def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_p
     return (_chat(client, model, messages, llm_params) or existing).strip()
 
 
-def upsert_entity(session: Session, org_id: str, entity_id: str, entity: ExtractedEntity, summary: str) -> None:
+def upsert_entity(
+    session: Session, knowledge_base_id: str, entity_id: str, entity: ExtractedEntity, summary: str
+) -> None:
     session.run(
         "MERGE (e:Entity {id: $id}) "
-        "ON CREATE SET e.org_id = $org_id, e.type = $type, e.created_at = datetime() "
+        "ON CREATE SET e.knowledge_base_id = $knowledge_base_id, e.type = $type, e.created_at = datetime() "
         "SET e.name = $name, e.name_normalized = $nn, e.summary = $summary, "
         "e.aliases = $aliases, e.updated_at = datetime()",
         {
             "id": entity_id,
-            "org_id": org_id,
+            "knowledge_base_id": knowledge_base_id,
             "type": entity.type,
             "name": entity.name,
             "nn": normalize_name(entity.name),
@@ -243,27 +262,29 @@ def upsert_entity(session: Session, org_id: str, entity_id: str, entity: Extract
 
 
 def write_relationship(
-    session: Session, org_id: str, source_id: str, target_id: str, rel_type: str, job_id: str
+    session: Session, knowledge_base_id: str, source_id: str, target_id: str, rel_type: str, job_id: str
 ) -> None:
     session.run(
-        "MATCH (a:Entity {id: $source_id, org_id: $org_id}), (b:Entity {id: $target_id, org_id: $org_id}) "
-        "MERGE (a)-[r:RELATED {type: $rel_type, org_id: $org_id}]->(b) "
+        "MATCH (a:Entity {id: $source_id, knowledge_base_id: $knowledge_base_id}), "
+        "(b:Entity {id: $target_id, knowledge_base_id: $knowledge_base_id}) "
+        "MERGE (a)-[r:RELATED {type: $rel_type, knowledge_base_id: $knowledge_base_id}]->(b) "
         "ON CREATE SET r.source_job_id = $job_id, r.created_at = datetime()",
         {
             "source_id": source_id,
             "target_id": target_id,
-            "org_id": org_id,
+            "knowledge_base_id": knowledge_base_id,
             "rel_type": rel_type,
             "job_id": job_id,
         },
     )
 
 
-def write_provenance(session: Session, org_id: str, entity_id: str, job_id: str) -> None:
+def write_provenance(session: Session, knowledge_base_id: str, entity_id: str, job_id: str) -> None:
     session.run(
-        "MERGE (s:Source {org_id: $org_id, job_id: $job_id}) "
-        "WITH s MATCH (e:Entity {id: $entity_id, org_id: $org_id}) MERGE (e)-[:MENTIONED_IN]->(s)",
-        {"org_id": org_id, "job_id": job_id, "entity_id": entity_id},
+        "MERGE (s:Source {knowledge_base_id: $knowledge_base_id, job_id: $job_id}) "
+        "WITH s MATCH (e:Entity {id: $entity_id, knowledge_base_id: $knowledge_base_id}) "
+        "MERGE (e)-[:MENTIONED_IN]->(s)",
+        {"knowledge_base_id": knowledge_base_id, "job_id": job_id, "entity_id": entity_id},
     )
 
 
@@ -274,7 +295,7 @@ class MergeResult(BaseModel):
 
 
 def merge_content(
-    org_id: str,
+    knowledge_base_id: str,
     content: str,
     entity_types: list[str],
     relationship_types: list[str],
@@ -288,7 +309,7 @@ def merge_content(
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
         extraction = extract_knowledge(client, config.LLM_MODEL, entity_types, relationship_types, content, llm_params)
         entities = [e for e in extraction.entities if e.type.lower() in allowed_entities]
-        resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, org_id, entities, llm_params)
+        resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, knowledge_base_id, entities, llm_params)
         for entity, existing_id in zip(entities, resolved_ids, strict=True):
             if existing_id is None:
                 entity_id, summary = str(uuid.uuid4()), entity.description
@@ -296,14 +317,14 @@ def merge_content(
             else:
                 entity_id = existing_id
                 row = neo.run(
-                    "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
-                    {"id": entity_id, "org_id": org_id},
+                    "MATCH (e:Entity {id: $id, knowledge_base_id: $knowledge_base_id}) RETURN e.summary AS s",
+                    {"id": entity_id, "knowledge_base_id": knowledge_base_id},
                 ).single()
                 existing_summary = row["s"] if row else ""
                 summary = merge_summary(client, config.LLM_MODEL, existing_summary, entity.description, llm_params)
                 merged += 1
-            upsert_entity(neo, org_id, entity_id, entity, summary)
-            write_provenance(neo, org_id, entity_id, job_id)
+            upsert_entity(neo, knowledge_base_id, entity_id, entity, summary)
+            write_provenance(neo, knowledge_base_id, entity_id, job_id)
             name_to_id[normalize_name(entity.name)] = entity_id
 
         for rel in extraction.relationships:
@@ -312,6 +333,6 @@ def merge_content(
             src = name_to_id.get(normalize_name(rel.source_name))
             tgt = name_to_id.get(normalize_name(rel.target_name))
             if src and tgt:
-                write_relationship(neo, org_id, src, tgt, rel.type, job_id)
+                write_relationship(neo, knowledge_base_id, src, tgt, rel.type, job_id)
                 rels += 1
     return MergeResult(entities_created=created, entities_merged=merged, relationships_created=rels)

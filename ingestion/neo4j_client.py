@@ -20,7 +20,7 @@ def get_neo4j_session() -> Session:
 
 def bootstrap_schema() -> None:
     # Idempotent: a unique id per entity, and a full-text index over name + aliases
-    # used for resolution candidate lookup. org_id is a filter property on every query.
+    # used for resolution candidate lookup. knowledge_base_id is a filter property on every query.
     with get_neo4j_session() as session:
         session.run("CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE")
         session.run("CREATE FULLTEXT INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON EACH [e.name, e.aliases]")

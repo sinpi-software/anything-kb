@@ -35,7 +35,7 @@ export interface RegisterInput {
   email: string;
   password: string;
   name?: string;
-  org_name?: string;
+  knowledge_base_name?: string;
 }
 
 export interface LoginInput {

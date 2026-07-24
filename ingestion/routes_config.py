@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 
-from auth import require_org
+from auth import require_knowledge_base
 from db import get_postgres_session
-from models import OrgConfig
+from models import KnowledgeBaseConfig
 from schemas import ConfigRequest, ConfigResponse
 
 router = APIRouter()
@@ -15,14 +15,18 @@ router = APIRouter()
     summary="Set your extraction config",
     responses={401: {"description": "Missing or invalid API key"}},
 )
-def put_config(body: ConfigRequest, org_id: str = Depends(require_org)) -> ConfigResponse:
-    """Upsert your org's relevance prompt and the entity / relationship types the graph
+def put_config(body: ConfigRequest, knowledge_base_id: str = Depends(require_knowledge_base)) -> ConfigResponse:
+    """Upsert your knowledge_base's relevance prompt and the entity / relationship types the graph
     captures. Applies to content ingested after the change."""
     with get_postgres_session() as session:
-        cfg = session.query(OrgConfig).filter(OrgConfig.org_id == org_id).one_or_none()
+        cfg = (
+            session.query(KnowledgeBaseConfig)
+            .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
+            .one_or_none()
+        )
         if cfg is None:
-            cfg = OrgConfig(
-                org_id=org_id,
+            cfg = KnowledgeBaseConfig(
+                knowledge_base_id=knowledge_base_id,
                 relevance_prompt=body.relevance_prompt,
                 entity_types=body.entity_types,
                 relationship_types=body.relationship_types,
@@ -34,7 +38,7 @@ def put_config(body: ConfigRequest, org_id: str = Depends(require_org)) -> Confi
             cfg.relationship_types = body.relationship_types
         session.commit()
     return ConfigResponse(
-        org_id=org_id,
+        knowledge_base_id=knowledge_base_id,
         relevance_prompt=body.relevance_prompt,
         entity_types=body.entity_types,
         relationship_types=body.relationship_types,

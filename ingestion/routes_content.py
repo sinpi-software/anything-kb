@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from auth import require_org
+from auth import require_knowledge_base
 from db import get_postgres_session
 from models import IngestJob
 from sanitize import sanitize
@@ -31,7 +31,7 @@ def _sanitize_json(value: Any) -> Any:
     summary="Submit content for ingestion",
     responses={401: {"description": "Missing or invalid API key"}},
 )
-def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> ContentAccepted:
+def post_content(body: ContentRequest, knowledge_base_id: str = Depends(require_knowledge_base)) -> ContentAccepted:
     """Queue text for relevance filtering and knowledge extraction.
 
     Returns immediately with a `job_id` (HTTP 202); processing happens asynchronously.
@@ -39,7 +39,7 @@ def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> Co
     """
     with get_postgres_session() as session:
         job = IngestJob(
-            org_id=org_id,
+            knowledge_base_id=knowledge_base_id,
             content=sanitize(body.text),
             job_metadata=_sanitize_json(body.metadata),
         )
@@ -57,19 +57,19 @@ def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> Co
     summary="Check ingestion status",
     responses={
         401: {"description": "Missing or invalid API key"},
-        404: {"description": "No such job for this org"},
+        404: {"description": "No such job for this knowledge_base"},
     },
 )
-def get_content(job_id: str, org_id: str = Depends(require_org)) -> JobStatusResponse:
+def get_content(job_id: str, knowledge_base_id: str = Depends(require_knowledge_base)) -> JobStatusResponse:
     """Return a submitted item's status: `pending`, `processing`, `done`, `skipped`
-    (judged not relevant), or `failed`. Only the owning org can read a job."""
+    (judged not relevant), or `failed`. Only the owning knowledge_base can read a job."""
     try:
         uuid.UUID(job_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from None
     with get_postgres_session() as session:
         job = session.get(IngestJob, job_id)
-        if job is None or str(job.org_id) != org_id:
+        if job is None or str(job.knowledge_base_id) != knowledge_base_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
         return JobStatusResponse(
             job_id=str(job.id),

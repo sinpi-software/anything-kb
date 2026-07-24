@@ -40,7 +40,7 @@ TAGS_METADATA = [
     {"name": "Content", "description": "Submit content for ingestion and check a job's status."},
     {"name": "Configuration", "description": "Set your relevance prompt and entity / relationship types."},
     {"name": "Accounts", "description": "Email/password auth: register, log in, verify email, reset password."},
-    {"name": "API keys", "description": "Create and manage your org's API keys (session-authenticated)."},
+    {"name": "API keys", "description": "Create and manage your knowledge base's API keys (session-authenticated)."},
 ]
 
 app = FastAPI(

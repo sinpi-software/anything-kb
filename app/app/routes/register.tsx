@@ -19,7 +19,7 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [orgName, setOrgName] = useState("");
+  const [knowledgeBaseName, setKnowledgeBaseName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,7 +32,7 @@ export default function Register() {
         email,
         password,
         name: name || undefined,
-        org_name: orgName || undefined,
+        knowledge_base_name: knowledgeBaseName || undefined,
       });
       await navigate("/app");
     } catch (err) {
@@ -83,8 +83,8 @@ export default function Register() {
           <Input autoComplete="name" value={name} onValueChange={setName} />
         </Field>
         <Field>
-          <FieldLabel>Workspace name (optional)</FieldLabel>
-          <Input value={orgName} onValueChange={setOrgName} />
+          <FieldLabel>Knowledge base name (optional)</FieldLabel>
+          <Input value={knowledgeBaseName} onValueChange={setKnowledgeBaseName} />
         </Field>
         <Button type="submit" disabled={submitting} className="justify-center">
           {submitting ? "Creating your graph…" : "Start free"}

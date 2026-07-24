@@ -198,7 +198,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     revalidator.revalidate();
   }
 
-  const primaryOrg = me.orgs[0];
+  const primaryKnowledgeBase = me.knowledge_bases[0];
 
   return (
     <div className="min-h-svh">
@@ -215,7 +215,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           Dashboard
         </p>
         <h1 className="mt-3.5 text-3xl font-semibold tracking-tight">{me.email}</h1>
-        {primaryOrg ? <p className="mt-1 text-muted">{primaryOrg.org_name}</p> : null}
+        {primaryKnowledgeBase ? <p className="mt-1 text-muted">{primaryKnowledgeBase.knowledge_base_name}</p> : null}
 
         <div className="mt-8 flex flex-col gap-6">
           {!me.email_verified ? <VerifyEmailBanner /> : null}

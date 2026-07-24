@@ -387,3 +387,54 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
     finally:
         with get_neo4j_session() as neo:
             neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_normalizes_type_casing_and_stores_configured_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    bootstrap_schema()
+    # The model emits UPPER_SNAKE / lowercase even though the config uses sentence case.
+    extraction = KnowledgeExtraction(
+        entities=[
+            ExtractedEntity(name="Ada", type="person", description="d"),
+            ExtractedEntity(name="Bill 5", type="LEGISLATION", description="d"),
+        ],
+        relationships=[
+            ExtractedRelationship(source_name="Ada", target_name="Bill 5", type="AFFECTED_BY"),
+        ],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            "Ada is affected by Bill 5.",
+            [{"name": "Person", "description": ""}, {"name": "Legislation", "description": ""}],
+            [{"name": "Affected by", "description": ""}],
+            job_id,
+        )
+        assert result.relationships_created == 1  # matched despite the model's UPPER_SNAKE casing
+        with get_neo4j_session() as neo:
+            rel = neo.run(
+                "MATCH (:Entity {knowledge_base_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": knowledge_base_id}
+            ).single(True)
+            assert rel["t"] == "Affected by"  # stored as the configured name, not the model's casing
+            entity_type = neo.run(
+                "MATCH (e:Entity {knowledge_base_id: $o, name: 'Ada'}) RETURN e.type AS t", {"o": knowledge_base_id}
+            ).single(True)
+            assert entity_type["t"] == "Person"  # entity type normalized to configured casing too
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})

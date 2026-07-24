@@ -307,6 +307,12 @@ class MergeResult(BaseModel):
     relationships_created: int
 
 
+def _norm_type(name: str) -> str:
+    """Fold a type name to a case/spacing-insensitive key, so 'Affected by',
+    'AFFECTED_BY', and 'affected-by' all match the same configured type."""
+    return "".join(ch for ch in name.upper() if ch.isalnum())
+
+
 def merge_content(
     knowledge_base_id: str,
     content: str,
@@ -314,14 +320,21 @@ def merge_content(
     relationship_types: list[dict[str, str]],
     job_id: str,
 ) -> MergeResult:
-    allowed_entities = {t["name"].lower() for t in entity_types}
-    allowed_rels = {t["name"].upper() for t in relationship_types}
+    # Map a normalized key back to the exact configured name — that name is what we store,
+    # so labels display the way the user wrote them regardless of the model's casing.
+    entity_canon = {_norm_type(t["name"]): t["name"] for t in entity_types}
+    rel_canon = {_norm_type(t["name"]): t["name"] for t in relationship_types}
     llm_params: dict[str, Any] = {}
     created = merged = rels = 0
     name_to_id: dict[str, str] = {}
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
         extraction = extract_knowledge(client, config.LLM_MODEL, entity_types, relationship_types, content, llm_params)
-        entities = [e for e in extraction.entities if e.type.lower() in allowed_entities]
+        entities = []
+        for e in extraction.entities:
+            canonical = entity_canon.get(_norm_type(e.type))
+            if canonical is not None:
+                e.type = canonical  # normalize to the configured casing before storing
+                entities.append(e)
         resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, knowledge_base_id, entities, llm_params)
         for entity, existing_id in zip(entities, resolved_ids, strict=True):
             if existing_id is None:
@@ -341,11 +354,12 @@ def merge_content(
             name_to_id[normalize_name(entity.name)] = entity_id
 
         for rel in extraction.relationships:
-            if rel.type.upper() not in allowed_rels:
+            canonical = rel_canon.get(_norm_type(rel.type))
+            if canonical is None:
                 continue
             src = name_to_id.get(normalize_name(rel.source_name))
             tgt = name_to_id.get(normalize_name(rel.target_name))
             if src and tgt:
-                write_relationship(neo, knowledge_base_id, src, tgt, rel.type, job_id)
+                write_relationship(neo, knowledge_base_id, src, tgt, canonical, job_id)
                 rels += 1
     return MergeResult(entities_created=created, entities_merged=merged, relationships_created=rels)

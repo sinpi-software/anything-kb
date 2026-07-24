@@ -272,7 +272,7 @@ api_hostname = cfg.get("apiHostname")
 if api_hostname:
     api_paths = [
         {"path": p, "pathType": "Prefix", "backend": {"service": {"name": "ingestion-api", "port": {"number": 80}}}}
-        for p in ("/content", "/config", "/graphql", "/docs", "/redoc", "/openapi.json", "/api")
+        for p in ("/content", "/config", "/graphql", "/docs", "/openapi.json", "/api")
     ]
     marketing_path = {
         "path": "/",

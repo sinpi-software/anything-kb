@@ -48,6 +48,8 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=TAGS_METADATA,
     lifespan=lifespan,
+    docs_url=None,  # Swagger UI off — ReDoc is the docs
+    redoc_url="/docs",  # serve ReDoc at /docs
 )
 app.include_router(content_router)
 app.include_router(config_router)

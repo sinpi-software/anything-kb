@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import require_org
@@ -21,6 +23,10 @@ def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> Co
 
 @router.get("/content/{job_id}", response_model=JobStatusResponse)
 def get_content(job_id: str, org_id: str = Depends(require_org)) -> JobStatusResponse:
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from None
     with get_postgres_session() as session:
         job = session.get(IngestJob, job_id)
         if job is None or str(job.org_id) != org_id:

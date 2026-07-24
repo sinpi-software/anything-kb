@@ -13,10 +13,6 @@ from db import get_postgres_session
 from models import Artifact, Org, Transformation, TransformationType, TransformRun, TransformRunStatus
 
 
-def test_skipped_status_exists() -> None:
-    assert TransformRunStatus.SKIPPED.value == "skipped"
-
-
 def test_transformation_has_name_and_gate_columns() -> None:
     with get_postgres_session() as session:
         assert session.bind is not None
@@ -28,7 +24,7 @@ from gates import evaluate_gate  # noqa: E402
 
 
 def _gate(op: str, value: object) -> dict[str, object]:
-    return {"source": "sc", "field": "score", "op": op, "value": value}
+    return {"field": "score", "op": op, "value": value}
 
 
 def test_gate_passes_numeric() -> None:
@@ -42,7 +38,7 @@ def test_gate_fails_numeric() -> None:
     assert "score" in reason
 
 
-def test_gate_fails_when_source_missing() -> None:
+def test_gate_fails_when_no_output() -> None:
     ok, reason = evaluate_gate(_gate("gte", 5), None)
     assert ok is False and "no output" in reason
 
@@ -63,14 +59,14 @@ def test_gate_type_mismatch_fails_not_raises() -> None:
 
 
 def test_gate_contains_and_in() -> None:
-    assert evaluate_gate({"source": "c", "field": "categories", "op": "contains", "value": "tech"},
+    assert evaluate_gate({"field": "categories", "op": "contains", "value": "tech"},
                          '{"categories": ["tech", "science"]}')[0] is True
-    assert evaluate_gate({"source": "c", "field": "cat", "op": "in", "value": ["a", "b"]},
+    assert evaluate_gate({"field": "cat", "op": "in", "value": ["a", "b"]},
                          '{"cat": "a"}')[0] is True
 
 
 def test_gate_non_string_field_fails_not_raises() -> None:
-    ok, _ = evaluate_gate({"source": "s", "field": ["x"], "op": "eq", "value": 1}, '{"score": 7}')
+    ok, _ = evaluate_gate({"field": ["x"], "op": "eq", "value": 1}, '{"score": 7}')
     assert ok is False
 
 
@@ -87,9 +83,9 @@ requires_postgres = pytest.mark.skipif(not _postgres_available(), reason="Postgr
 
 
 def _run_gate_case(monkeypatch: pytest.MonkeyPatch, score: int, threshold: int, expect_second_called: bool) -> None:
-    """Seeds a throwaway Org + source Artifact + two Transformations (the 2nd gated on the
-    1st's name), monkeypatches DISPATCH so both handlers are fakes (no real LLM calls), and
-    runs the real `run_transform_pipeline` to prove the gate actually halts the pipeline."""
+    """Seeds a throwaway Org + source Artifact + two Transformations (the 1st has an outgoing
+    gate on its own output), monkeypatches DISPATCH so both handlers are fakes (no real LLM
+    calls), and runs the real `run_transform_pipeline` to prove the gate halts the later step."""
     # run_transform_pipeline calls get_run_logger(), which raises outside a live flow/task
     # run context; stub it so we can call the flow's plain function (`.fn`) directly and
     # skip spinning up Prefect's orchestration engine entirely.
@@ -162,6 +158,7 @@ def _run_gate_case(monkeypatch: pytest.MonkeyPatch, score: int, threshold: int, 
                 model="test/model",
                 prompt="score it",
                 position=0,
+                gate={"field": "score", "op": "gte", "value": threshold},
             )
             session.add(t1)
             session.flush()
@@ -174,7 +171,6 @@ def _run_gate_case(monkeypatch: pytest.MonkeyPatch, score: int, threshold: int, 
                 model="test/model",
                 prompt="summarize",
                 position=1,
-                gate={"source": "sc", "field": "score", "op": "gte", "value": threshold},
             )
             session.add(t2)
             session.flush()
@@ -193,11 +189,10 @@ def _run_gate_case(monkeypatch: pytest.MonkeyPatch, score: int, threshold: int, 
             second_runs = session.query(TransformRun).filter_by(transformation_id=t2_id).all()
             if expect_second_called:
                 assert any(r.status == TransformRunStatus.COMPLETED.value for r in second_runs)
-                assert not any(r.status == TransformRunStatus.SKIPPED.value for r in second_runs)
                 downstream_output_id = next(r.output_artifact_id for r in second_runs if r.output_artifact_id)
             else:
-                assert any(r.status == TransformRunStatus.SKIPPED.value for r in second_runs)
-                assert not any(r.status == TransformRunStatus.COMPLETED.value for r in second_runs)
+                # A closed gate halts the later step entirely — it never runs, so no run record.
+                assert second_runs == []
     finally:
         with get_postgres_session() as session:
             transformation_ids = [i for i in (t1_id, t2_id) if i is not None]
@@ -225,7 +220,7 @@ def _run_gate_case(monkeypatch: pytest.MonkeyPatch, score: int, threshold: int, 
 
 
 @requires_postgres
-def test_failing_gate_halts_pipeline_and_records_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failing_gate_halts_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     _run_gate_case(monkeypatch, score=3, threshold=5, expect_second_called=False)
 
 

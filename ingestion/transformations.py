@@ -160,7 +160,7 @@ def validate_transform_config(
     if not name or not name.strip():
         raise ValueError("transform requires a name")
     if gate is not None:
-        missing = [k for k in ("source", "field", "op", "value") if k not in gate]
+        missing = [k for k in ("field", "op", "value") if k not in gate]
         if missing:
             raise ValueError(f"gate missing keys: {missing}")
         if gate["op"] not in GATE_OPS:
@@ -196,34 +196,11 @@ def run_transform_pipeline(input_artifact_id: str) -> None:
 
     logger.info("Running %d transform(s) for org %s on artifact %s", len(pipeline), org_id, input_artifact_id)
 
-    outputs: dict[str, str] = {}  # transform name -> its output artifact id
     for transformation_id, transform_type, name, gate in pipeline:
         handler = DISPATCH.get(transform_type)
         if handler is None:
             logger.warning("No handler for transform type %r; skipping", transform_type)
             continue
-
-        if gate:
-            source_name = gate.get("source")
-            source_output_id = outputs.get(source_name) if isinstance(source_name, str) else None
-            source_data = None
-            if source_output_id is not None:
-                with get_postgres_session() as session:
-                    src = session.get(Artifact, source_output_id)
-                    source_data = src.data if src else None
-            passed, reason = evaluate_gate(gate, source_data)
-            if not passed:
-                with get_postgres_session() as session:
-                    run = TransformRun(
-                        transformation_id=transformation_id,
-                        input_artifact_id=input_artifact_id,
-                        status=TransformRunStatus.SKIPPED.value,
-                        error_message=reason,
-                    )
-                    session.add(run)
-                    session.commit()
-                logger.info("Gate closed for %s (%s); halting pipeline", name, reason)
-                break
 
         with get_postgres_session() as session:
             run = TransformRun(
@@ -244,5 +221,15 @@ def run_transform_pipeline(input_artifact_id: str) -> None:
             break
 
         _mark_run(run_id, TransformRunStatus.COMPLETED, output_artifact_id=output_artifact_id)
-        outputs[name] = output_artifact_id
         logger.info("Transform %s (%s) produced artifact %s", transformation_id, name, output_artifact_id)
+
+        # Outgoing gate: a step's own output decides whether the pipeline continues past it.
+        # A closed gate leaves this step COMPLETED and simply halts the later steps.
+        if gate:
+            with get_postgres_session() as session:
+                out = session.get(Artifact, output_artifact_id)
+                output_data = out.data if out else None
+            passed, reason = evaluate_gate(gate, output_data)
+            if not passed:
+                logger.info("Gate closed after %s (%s); halting pipeline", name, reason)
+                break

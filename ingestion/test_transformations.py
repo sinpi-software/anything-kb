@@ -55,6 +55,4 @@ def test_validate_requires_name() -> None:
 
 def test_validate_rejects_bad_gate_op() -> None:
     with pytest.raises(ValueError, match="op"):
-        validate_transform_config(
-            "score", "m", "p", None, "sc", {"source": "x", "field": "f", "op": "bogus", "value": 1}
-        )
+        validate_transform_config("score", "m", "p", None, "sc", {"field": "f", "op": "bogus", "value": 1})

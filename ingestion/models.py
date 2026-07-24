@@ -47,7 +47,6 @@ class TransformRunStatus(Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    SKIPPED = "skipped"
 
 
 class RssFeedItemStatus(Enum):

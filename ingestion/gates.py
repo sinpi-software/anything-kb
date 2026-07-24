@@ -14,19 +14,20 @@ GATE_OPS: dict[str, Callable[[Any, Any], bool]] = {
 }
 
 
-def evaluate_gate(gate: dict[str, Any], source_data: str | None) -> tuple[bool, str]:
-    """(passed, reason). Any problem — no source output, non-JSON, missing field,
-    unknown op, or a type mismatch — fails the gate rather than raising."""
-    source, field, op, value = gate.get("source"), gate.get("field"), gate.get("op"), gate.get("value")
-    label = f"{source}.{field} {op} {value!r}"
-    if source_data is None:
-        return False, f"gate: {source} produced no output"
+def evaluate_gate(gate: dict[str, Any], output: str | None) -> tuple[bool, str]:
+    """Evaluate a step's outgoing gate against its own output. (passed, reason).
+    Any problem — no output, non-JSON, missing field, unknown op, or a type
+    mismatch — fails the gate rather than raising."""
+    field, op, value = gate.get("field"), gate.get("op"), gate.get("value")
+    label = f"{field} {op} {value!r}"
+    if output is None:
+        return False, "gate: step produced no output"
     try:
-        parsed = json.loads(source_data)
+        parsed = json.loads(output)
     except (ValueError, TypeError):
-        return False, f"gate: {source} output is not JSON"
+        return False, "gate: output is not JSON"
     if not isinstance(parsed, dict) or not isinstance(field, str) or field not in parsed:
-        return False, f"gate: {source}.{field} missing"
+        return False, f"gate: field {field!r} missing from output"
     fn = GATE_OPS.get(str(op))
     if fn is None:
         return False, f"gate: unknown op {op!r}"

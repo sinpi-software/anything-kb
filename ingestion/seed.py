@@ -89,8 +89,9 @@ def seed_database() -> None:
             title="Hacker News",
         )
 
-        # Transform chain for the org — every step reads the source article (fan-out); gates
-        # reference an earlier step's output by name and halt the chain when unmet.
+        # Transform chain for the org — every step reads the source article (fan-out); a step's
+        # outgoing gate checks its own output and halts the later steps when unmet. Here the
+        # newsworthiness gate stops the chain (so knowledge never runs) when score < 5.
         transform_model = "openai/gpt-5-nano"
         transform_chain = [
             (
@@ -104,10 +105,10 @@ def seed_database() -> None:
             (
                 1,
                 TransformationType.SCORE.value,
-                "Given this summary, is the story newsworthy? Score 0-10 with a short rationale.",
+                "Is this story newsworthy? Score 0-10 with a short rationale.",
                 None,
                 "newsworthiness",
-                None,
+                {"field": "score", "op": "gte", "value": 5},
             ),
             (
                 2,
@@ -115,7 +116,7 @@ def seed_database() -> None:
                 "Extract the notable entities and how they relate from this article.",
                 {"entity_types": ["Person", "Place", "Organization", "Topic", "Story"]},
                 "knowledge",
-                {"source": "newsworthiness", "field": "score", "op": "gte", "value": 5},
+                None,
             ),
         ]
         transforms_created = []

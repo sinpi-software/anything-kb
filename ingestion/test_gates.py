@@ -62,3 +62,8 @@ def test_gate_contains_and_in() -> None:
                          '{"categories": ["tech", "science"]}')[0] is True
     assert evaluate_gate({"source": "c", "field": "cat", "op": "in", "value": ["a", "b"]},
                          '{"cat": "a"}')[0] is True
+
+
+def test_gate_non_string_field_fails_not_raises() -> None:
+    ok, _ = evaluate_gate({"source": "s", "field": ["x"], "op": "eq", "value": 1}, '{"score": 7}')
+    assert ok is False

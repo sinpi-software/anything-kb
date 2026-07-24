@@ -25,7 +25,7 @@ def evaluate_gate(gate: dict[str, Any], source_data: str | None) -> tuple[bool, 
         parsed = json.loads(source_data)
     except (ValueError, TypeError):
         return False, f"gate: {source} output is not JSON"
-    if not isinstance(parsed, dict) or field not in parsed:
+    if not isinstance(parsed, dict) or not isinstance(field, str) or field not in parsed:
         return False, f"gate: {source}.{field} missing"
     fn = GATE_OPS.get(str(op))
     if fn is None:

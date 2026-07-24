@@ -74,11 +74,26 @@ export function GraphExplorer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [width, setWidth] = useState(800);
+  const [colors, setColors] = useState({ bg: "#0e1517", label: "#e9eeec", link: "#8b9c97" });
 
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     import("react-force-graph-2d").then((mod) => setForceGraph(() => mod.default));
+  }, []);
+
+  // Read the themed console colors once, and refresh when the theme changes.
+  useEffect(() => {
+    const refresh = () => setColors(readColors());
+    refresh();
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", refresh);
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      mq.removeEventListener("change", refresh);
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -157,16 +172,14 @@ export function GraphExplorer() {
             graphData={data}
             width={width}
             height={Math.round(typeof window === "undefined" ? 480 : window.innerHeight * 0.62)}
-            backgroundColor={readColors().bg}
+            backgroundColor={colors.bg}
             nodeRelSize={5}
             nodeLabel={(n: GraphNode) => `${n.name} · ${n.type}`}
-            linkLabel={(l: GraphLink) => l.label}
-            linkColor={() => readColors().link}
+            linkColor={() => colors.link}
             linkDirectionalArrowLength={3}
             linkDirectionalArrowRelPos={1}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
-              const { label } = readColors();
               ctx.beginPath();
               ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
               ctx.fillStyle = colorForType(node.type);
@@ -175,7 +188,7 @@ export function GraphExplorer() {
               ctx.font = `${fontSize}px ui-monospace, monospace`;
               ctx.textAlign = "center";
               ctx.textBaseline = "top";
-              ctx.fillStyle = label;
+              ctx.fillStyle = colors.label;
               ctx.fillText(node.name, node.x, node.y + 7);
             }}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -184,6 +197,26 @@ export function GraphExplorer() {
               ctx.arc(node.x, node.y, 7, 0, 2 * Math.PI);
               ctx.fillStyle = color;
               ctx.fill();
+            }}
+            linkCanvasObjectMode={() => "after"}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            linkCanvasObject={(link: any, ctx: CanvasRenderingContext2D, scale: number) => {
+              const s = link.source;
+              const t = link.target;
+              if (!s || !t || typeof s.x !== "number" || typeof t.x !== "number") return;
+              const mx = (s.x + t.x) / 2;
+              const my = (s.y + t.y) / 2;
+              const fontSize = Math.max(8 / scale, 1.5);
+              ctx.font = `${fontSize}px ui-monospace, monospace`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              // A background pill so the edge line doesn't cut through the label.
+              const textWidth = ctx.measureText(link.label).width;
+              const pad = 3 / scale;
+              ctx.fillStyle = colors.bg;
+              ctx.fillRect(mx - textWidth / 2 - pad, my - fontSize / 2 - pad, textWidth + pad * 2, fontSize + pad * 2);
+              ctx.fillStyle = colors.link;
+              ctx.fillText(link.label, mx, my);
             }}
           />
         ) : null}

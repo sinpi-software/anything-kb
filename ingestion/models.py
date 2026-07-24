@@ -112,6 +112,33 @@ class ApiKey(_BaseModel):
     org: Mapped["Org"] = relationship("Org", backref="api_keys")
     key_hash: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
     revoked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    name: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    # First chars of the raw key, for masked display (the raw key itself is never stored).
+    prefix: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+
+class AuthSession(_BaseModel):
+    """A logged-in session. The `session` cookie holds an opaque token; only its sha256 is stored."""
+
+    __tablename__ = "sessions"
+    token_hash: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class EmailToken(_BaseModel):
+    """A single-use email link token (verification or password reset). The link carries an
+    opaque token; only its sha256 is stored. `purpose` is 'verify' | 'reset'."""
+
+    __tablename__ = "email_tokens"
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    purpose: Mapped[str] = mapped_column(TEXT, nullable=False)
+    token_hash: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
 class IngestJob(_BaseModel):

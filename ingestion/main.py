@@ -12,8 +12,10 @@ dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.sample")
 
 from graph_api import graphql_router  # noqa: E402
 from neo4j_client import bootstrap_schema  # noqa: E402
+from routes_auth import router as auth_router  # noqa: E402
 from routes_config import router as config_router  # noqa: E402
 from routes_content import router as content_router  # noqa: E402
+from routes_keys import router as keys_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -36,6 +38,8 @@ over GraphQL.
 TAGS_METADATA = [
     {"name": "Content", "description": "Submit content for ingestion and check a job's status."},
     {"name": "Configuration", "description": "Set your relevance prompt and entity / relationship types."},
+    {"name": "Accounts", "description": "Email/password auth: register, log in, verify email, reset password."},
+    {"name": "API keys", "description": "Create and manage your org's API keys (session-authenticated)."},
 ]
 
 app = FastAPI(
@@ -48,6 +52,8 @@ app = FastAPI(
 app.include_router(content_router)
 app.include_router(config_router)
 app.include_router(graphql_router, prefix="/graphql")
+app.include_router(auth_router)
+app.include_router(keys_router)
 
 
 if __name__ == "__main__":

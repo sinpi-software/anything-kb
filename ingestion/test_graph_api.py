@@ -10,6 +10,7 @@ os.environ.setdefault("INGESTION_POSTGRES_URL", "postgresql://ingestion:ingestio
 import pytest
 from sqlalchemy import text as sqltext
 
+from graph_read import query_edges
 from knowledge import ExtractedEntity, upsert_entity, write_relationship
 from neo4j_client import bootstrap_schema, get_neo4j_session
 
@@ -149,3 +150,25 @@ def test_search_is_org_scoped(seeded) -> None:  # type: ignore[no-untyped-def]
     results = resp.json()["data"]["nodes"]
     assert [r["name"] for r in results] == ["Ada"]
     assert results[0]["summary"] == "Ada summary"
+
+
+@requires_stack
+def test_query_edges_excludes_cross_org_target() -> None:
+    # Simulates a corrupt/foreign-target RELATED edge (org-A source, org-B target, edge stamped
+    # org_id=org-A) that write_relationship could never produce but a future writer or a bad
+    # migration could. query_edges must drop it because b.org_id != $org_id, not because the
+    # write side happens to keep edges same-org.
+    org_a, org_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    src_id, foreign_target_id = str(uuid.uuid4()), str(uuid.uuid4())
+    try:
+        with get_neo4j_session() as s:
+            s.run(
+                "CREATE (a:Entity {id: $src, org_id: $org_a, type: 'Person', name: 'Src', summary: 's'}), "
+                "(b:Entity {id: $tgt, org_id: $org_b, type: 'Person', name: 'Foreign', summary: 's'}), "
+                "(a)-[:RELATED {org_id: $org_a, type: 'LINKED'}]->(b)",
+                {"src": src_id, "tgt": foreign_target_id, "org_a": org_a, "org_b": org_b},
+            )
+        assert query_edges(org_a, src_id, None) == []
+    finally:
+        with get_neo4j_session() as s:
+            s.run("MATCH (n) WHERE n.org_id IN [$a, $b] DETACH DELETE n", {"a": org_a, "b": org_b})

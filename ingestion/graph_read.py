@@ -38,7 +38,9 @@ def query_node(org_id: str, node_id: str) -> dict[str, Any] | None:
 
 
 def query_edges(org_id: str, node_id: str, type_: str | None) -> list[dict[str, Any]]:
-    cypher = "MATCH (a:Entity {id: $id, org_id: $org_id})-[r:RELATED {org_id: $org_id}]->(b:Entity) "
+    cypher = (
+        "MATCH (a:Entity {id: $id, org_id: $org_id})-[r:RELATED {org_id: $org_id}]->(b:Entity {org_id: $org_id}) "
+    )
     params: dict[str, Any] = {"id": node_id, "org_id": org_id}
     if type_:
         cypher += "WHERE r.type = $type "

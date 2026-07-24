@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { transformationInputSchema, reorderSchema, parseParams, TRANSFORMATION_TYPES } from "./transformation";
 
 describe("transformationInputSchema", () => {
-  const valid = { type: "score", model: "openai/gpt-4o", prompt: "Rate it", params: { temperature: 0.2 } };
+  const valid = { type: "score", name: "score", model: "openai/gpt-4o", prompt: "Rate it", params: { temperature: 0.2 } };
 
   it("accepts a valid input", () => {
     expect(transformationInputSchema.safeParse(valid).success).toBe(true);
@@ -18,8 +18,14 @@ describe("transformationInputSchema", () => {
     expect(r.success).toBe(false);
   });
 
+  it("requires a name", () => {
+    const { name, ...rest } = valid;
+    const r = transformationInputSchema.safeParse(rest);
+    expect(r.success).toBe(false);
+  });
+
   it("allows null model and null params", () => {
-    expect(transformationInputSchema.safeParse({ type: "summarize", model: null, prompt: "x", params: null }).success).toBe(true);
+    expect(transformationInputSchema.safeParse({ type: "summarize", name: "x", model: null, prompt: "x", params: null }).success).toBe(true);
   });
 
   it("rejects temperature above range", () => {
@@ -30,6 +36,27 @@ describe("transformationInputSchema", () => {
   it("keeps unknown param keys (passthrough)", () => {
     const r = transformationInputSchema.parse({ ...valid, params: { seed: 42 } });
     expect(r.params).toEqual({ seed: 42 });
+  });
+
+  it("accepts a valid gate", () => {
+    const r = transformationInputSchema.safeParse({
+      ...valid,
+      gate: { source: "newsworthiness", field: "score", op: "gte", value: 5 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a bad gate op", () => {
+    const r = transformationInputSchema.safeParse({
+      ...valid,
+      gate: { source: "newsworthiness", field: "score", op: ">=", value: 5 },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("allows gate omitted or null", () => {
+    expect(transformationInputSchema.safeParse(valid).success).toBe(true);
+    expect(transformationInputSchema.safeParse({ ...valid, gate: null }).success).toBe(true);
   });
 });
 

@@ -25,9 +25,11 @@ export async function createTransformation(orgId: string, input: TransformationI
       orgId,
       position: next,
       type: input.type,
+      name: input.name,
       model: input.model ?? null,
       prompt: input.prompt,
       params: (input.params ?? null) as typeof transformations.$inferInsert["params"],
+      gate: (input.gate ?? null) as typeof transformations.$inferInsert["gate"],
     })
     .returning();
   return row;
@@ -38,9 +40,11 @@ export async function updateTransformation(id: string, input: TransformationInpu
     .update(transformations)
     .set({
       type: input.type,
+      name: input.name,
       model: input.model ?? null,
       prompt: input.prompt,
       params: (input.params ?? null) as typeof transformations.$inferInsert["params"],
+      gate: (input.gate ?? null) as typeof transformations.$inferInsert["gate"],
       updatedAt: new Date().toISOString(),
     })
     .where(eq(transformations.id, id))

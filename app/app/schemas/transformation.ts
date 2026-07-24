@@ -12,11 +12,21 @@ export const llmParamsSchema = z
   })
   .passthrough();
 
+export const GATE_OPS = ["eq", "ne", "gt", "gte", "lt", "lte", "in", "contains"] as const;
+export const gateSchema = z.object({
+  source: z.string().min(1),
+  field: z.string().min(1),
+  op: z.enum(GATE_OPS),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+});
+
 export const transformationInputSchema = z.object({
   type: z.enum(TRANSFORMATION_TYPES),
+  name: z.string().trim().min(1, "Name is required"),
   model: z.string().trim().min(1).nullable().optional(),
   prompt: z.string().trim().min(1, "Prompt is required"),
   params: llmParamsSchema.nullable().optional(),
+  gate: gateSchema.nullable().optional(),
 });
 export type TransformationInput = z.infer<typeof transformationInputSchema>;
 

@@ -1,96 +1,88 @@
-# Deploying the knowledge-graph engine to k3s
+# Deploying the knowledge-graph engine to k3s (`skynet`)
 
-Pulumi (Python) program that stands up the whole engine on a **single-node k3s**
-cluster: an in-cluster registry, Postgres 16, Neo4j 5, the API + worker, an
-Alembic migration job, and a Cloudflare Tunnel.
+Pulumi (Python) program that deploys the engine onto the single-node k3s cluster:
+Postgres 16, Neo4j 5, the API + worker, an Alembic migration job, and (optionally)
+a Cloudflare Tunnel.
+
+The cluster **already has a registry** (docker `registry:2` on the node at `:5000`,
+trusted by containerd as `localhost:5000`). So Pulumi does **not** manage a registry
+or touch `registries.yaml` — the image is built+pushed out of band and referenced by
+tag. Pulumi only deploys the workloads.
 
 ```
-node-trust (SSH) → registry → build+push image → postgres + neo4j
-                 → migrate (alembic) → api + worker → cloudflared
+build+push image (on the node) → pulumi up:
+  namespace + secrets → postgres + neo4j → migrate (alembic) → api + worker → [cloudflared]
 ```
 
-## Prerequisites
+## One-time prerequisites
 
-On the **machine you run `pulumi up` from**:
-
-- Docker (builds the image) — and it must allow pushing to the insecure LAN
-  registry. Add to `/etc/docker/daemon.json` and restart Docker:
-  ```json
-  { "insecure-registries": ["NODE_HOST:30500"] }
+- **kubeconfig** for the cluster, reachable from where you run Pulumi:
+  ```bash
+  ssh egeste@192.168.0.202 'sudo cat /etc/rancher/k3s/k3s.yaml' \
+    | sed 's#https://127.0.0.1:6443#https://192.168.0.202:6443#' > deploy/kubeconfig
   ```
-- `kubectl` context / `KUBECONFIG` pointing at the k3s cluster.
-- SSH access to the node as a user with **passwordless sudo** (used once to write
-  `/etc/rancher/k3s/registries.yaml` and restart k3s). Use a passphrase-less key.
-- Pulumi CLI, and a self-hosted state backend: `pulumi login --local` (state in
-  `~/.pulumi`) or `pulumi login file://./state`.
+- Pulumi CLI + self-hosted state: `pulumi login --local` and a `PULUMI_CONFIG_PASSPHRASE`.
+- The Python deps: `cd deploy && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`.
 
-In the **Cloudflare dashboard** (Zero Trust → Networks → Tunnels): create a
-tunnel, copy its **token**, and add a public hostname route pointing at
-`http://ingestion-api.ingestion.svc.cluster.local:80`.
+## 1. Build + push the image (on the node)
 
-## Configure
+Docker and the registry live on the node, so build there — no local Docker config needed:
+
+```bash
+SHA=$(git rev-parse --short HEAD)
+rsync -az --delete --exclude='.venv' --exclude='__pycache__' --exclude='.env*' \
+  ingestion/ egeste@192.168.0.202:/tmp/ingestion-build/
+ssh egeste@192.168.0.202 "cd /tmp/ingestion-build && \
+  docker build -t localhost:5000/anything-ingestion:$SHA . && \
+  docker push localhost:5000/anything-ingestion:$SHA"
+```
+
+## 2. Configure the stack
 
 ```bash
 cd deploy
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-pulumi stack init home                 # creates the stack + a state passphrase
+export PATH=$HOME/.pulumi/bin:$PATH
+export PULUMI_CONFIG_PASSPHRASE=$(cat .passphrase)     # created at stack init
+export KUBECONFIG=$(pwd)/kubeconfig
 
-pulumi config set nodeHost 192.168.1.50          # your k3s node IP/hostname
-pulumi config set sshUser steve
-pulumi config set sshPrivateKeyPath ~/.ssh/id_ed25519
-# pulumi config set registryNodePort 30500       # optional (default 30500)
-# pulumi config set imageTag v1                   # optional (default "latest")
-
-pulumi config set --secret pgPassword       "$(openssl rand -hex 16)"   # keep alphanumeric/URL-safe
+pulumi stack select home     # or: pulumi stack init home
+pulumi config set image localhost:5000/anything-ingestion:$SHA
+pulumi config set --secret pgPassword       "$(openssl rand -hex 16)"   # URL-safe
 pulumi config set --secret neo4jPassword    "$(openssl rand -hex 16)"
-pulumi config set --secret openrouterApiKey "sk-or-..."
-pulumi config set --secret tunnelToken      "<cloudflare tunnel token>"
+pulumi config set --secret openrouterApiKey "sk-or-..."                 # or pull from ../.env
+# optional — omit to skip the tunnel:
+# pulumi config set --secret tunnelToken "<cloudflare tunnel token>"
 ```
 
-> Passwords go straight into a Postgres connection URL, so use URL-safe values
-> (hex/alphanumeric). `openssl rand -hex 16` is fine.
-
-## Deploy
+## 3. Deploy
 
 ```bash
-pulumi up
+pulumi up --yes
 ```
 
-The first `pulumi up` briefly restarts k3s (to load the registry trust), then
-brings everything up in dependency order. On a rebuild, bump `imageTag` (or rely
-on the digest changing) and re-run `pulumi up` — the API/worker roll to the new
-image automatically.
+Pulumi waits for Postgres, then the migration Job, then brings up the API + worker
+(which wait on Neo4j). Re-deploying a new image: rebuild+push with a new `$SHA`,
+`pulumi config set image ...`, `pulumi up`.
 
-## First API key
-
-Seeding is a manual, on-demand step (it mints an org + prints an API key once):
+## 4. First API key
 
 ```bash
 kubectl -n ingestion exec deploy/ingestion-api -- python seed.py
 ```
 
-Copy the printed key — it's the credential for `POST /content`, `PUT /config`,
-and `/graphql` through the tunnel.
+Copy the printed key — it authenticates `POST /content`, `PUT /config`, `/graphql`.
 
-## Smoke test
+## Reaching the API
 
-```bash
-KEY=<the key>
-HOST=https://ingestion.your-domain.com          # your tunnel hostname
-curl -s -X PUT $HOST/config -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"relevance_prompt":"Tech companies and their people.","entity_types":["Person","Organization"],"relationship_types":["WORKS_AT","LEADS"]}'
-curl -s -X POST $HOST/content -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"text":"OpenAI, led by Sam Altman, released GPT-5."}'
-# poll GET /content/{job_id}, then:
-curl -s -X POST $HOST/graphql -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"query":"{ nodes { type name edges { type target { name } } } }"}'
-```
+- **Without a tunnel:** `kubectl -n ingestion port-forward svc/ingestion-api 8080:80`
+  then hit `http://localhost:8080`.
+- **With the Cloudflare Tunnel:** in the Cloudflare dashboard create a tunnel, add a
+  public-hostname route to `http://ingestion-api.ingestion.svc.cluster.local:80`,
+  then `pulumi config set --secret tunnelToken <token>` and `pulumi up`.
 
 ## Notes
 
-- **Single-node only.** `local-path` PVCs are node-local; a multi-node cluster
-  would need the DB/registry pods pinned to the node holding their data.
-- **Insecure registry** (HTTP) — fine on a trusted LAN; nothing else reaches
-  `:30500`. The node trusts it via `registries.yaml`; your build host trusts it
-  via `insecure-registries`.
-- **Tear down:** `pulumi destroy` (the PVCs, and thus the data, go with it).
+- **Single-node only** — `local-path` PVCs are node-local.
+- `kubeconfig` and `.passphrase` are gitignored — they hold cluster creds / the
+  state-encryption key. Keep them safe.
+- **Tear down:** `pulumi destroy` (PVCs and their data go with it).

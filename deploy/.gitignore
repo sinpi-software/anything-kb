@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 # Local Pulumi state (when using `pulumi login --local` / file backend)
 .pulumi/
+# Local-only secrets / cluster creds — never commit
+kubeconfig
+.passphrase
+# Stack config carries (encrypted) secrets — keep it local unless you deliberately
+# adopt Pulumi's encrypted-secrets-in-git model, then un-ignore it.
+Pulumi.*.yaml

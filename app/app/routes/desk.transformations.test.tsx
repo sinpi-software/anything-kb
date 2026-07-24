@@ -5,8 +5,8 @@ import { createRoutesStub } from "react-router";
 import TransformationsPage from "./desk.transformations";
 
 const rows = [
-  { id: "1", position: 0, type: "summarize", model: null, prompt: "Summarize the article", orgId: "o", params: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
-  { id: "2", position: 1, type: "score", model: "openai/gpt-4o", prompt: "Score it", orgId: "o", params: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
+  { id: "1", position: 0, name: "summarize", type: "summarize", model: null, prompt: "Summarize the article", orgId: "o", params: null, gate: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
+  { id: "2", position: 1, name: "score", type: "score", model: "openai/gpt-4o", prompt: "Score it", orgId: "o", params: null, gate: null, createdAt: "1970-01-01T00:00:00Z", updatedAt: "1970-01-01T00:00:00Z", createdById: null, updatedById: null },
 ];
 
 function renderPage() {
@@ -31,5 +31,20 @@ describe("TransformationsPage", () => {
     const expandButtons = await screen.findAllByRole("button", { name: "Expand row" });
     await userEvent.click(expandButtons[0]);
     expect(await screen.findByDisplayValue("Summarize the article")).toBeInTheDocument();
+  });
+
+  it("shows the gate editor fields once the gate toggle is enabled", async () => {
+    renderPage();
+    const expandButtons = await screen.findAllByRole("button", { name: "Expand row" });
+    await userEvent.click(expandButtons[0]);
+    await screen.findByDisplayValue("Summarize the article");
+
+    const gateToggle = screen.getByRole("checkbox", { name: "Add gate" });
+    await userEvent.click(gateToggle);
+
+    expect(screen.getByPlaceholderText("field")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("value")).toBeInTheDocument();
+    // Two selects were already present (Type for each row); enabling the gate adds source + op.
+    expect(await screen.findAllByRole("combobox")).toHaveLength(4);
   });
 });

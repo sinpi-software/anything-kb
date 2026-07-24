@@ -24,6 +24,7 @@ import type { Route } from "./+types/desk.transformations";
 import { listTransformations, type TransformationRow } from "~/services/transformations.server";
 import {
   TRANSFORMATION_TYPES,
+  GATE_OPS,
   parseParams,
   transformationInputSchema,
   type TransformationInput,
@@ -39,15 +40,30 @@ export async function loader({ params }: Route.LoaderArgs) {
   return { orgId: params.org_id, transformations: await listTransformations(params.org_id) };
 }
 
+type GateDraft = { source: string; field: string; op: string; value: string };
 type Draft = ReturnType<typeof toDraft>;
+
+function gateToDraft(gate: unknown): GateDraft | null {
+  if (!gate || typeof gate !== "object") return null;
+  const { source, field, op, value } = gate as Record<string, unknown>;
+  return { source: String(source ?? ""), field: String(field ?? ""), op: String(op ?? GATE_OPS[0]), value: String(value ?? "") };
+}
 
 function toDraft(row: TransformationRow) {
   return {
+    name: row.name,
     type: row.type as (typeof TRANSFORMATION_TYPES)[number],
     model: row.model ?? "",
     prompt: row.prompt,
     params: paramsFromRecord(row.params as Record<string, unknown> | null),
+    gate: gateToDraft(row.gate),
   };
+}
+
+// "5" -> number 5, "5.0" -> number 5, anything else -> the trimmed string as-is.
+function coerceGateValue(raw: string): string | number {
+  const trimmed = raw.trim();
+  return trimmed !== "" && !Number.isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
 }
 
 function buildPayload(draft: Draft): { ok: true; value: TransformationInput } | { ok: false; error: string } {
@@ -62,11 +78,16 @@ function buildPayload(draft: Draft): { ok: true; value: TransformationInput } | 
     }
   }
   const params = { ...(paramsResult.value ?? {}), ...known };
+  const gate = draft.gate
+    ? { source: draft.gate.source, field: draft.gate.field, op: draft.gate.op, value: coerceGateValue(draft.gate.value) }
+    : null;
   const candidate = {
     type: draft.type,
+    name: draft.name,
     model: draft.model.trim() || null,
     prompt: draft.prompt,
     params: Object.keys(params).length ? params : null,
+    gate,
   };
   const parsed = transformationInputSchema.safeParse(candidate);
   if (!parsed.success) {
@@ -110,7 +131,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
 
   function add() {
     addFetcher.submit(
-      { org_id: orgId, type: "summarize", prompt: "New transformation" },
+      { org_id: orgId, name: `new transformation ${Date.now()}`, type: "summarize", prompt: "New transformation" },
       { method: "POST", action: "/api/transformations", encType: "application/json" },
     );
   }
@@ -141,6 +162,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
               <TableRow>
                 <TableHead className="w-8" />
                 <TableHead className="w-12">#</TableHead>
+                <TableHead className="w-40">Name</TableHead>
                 <TableHead className="w-40">Type</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead className="w-8" />
@@ -149,7 +171,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
             </TableHeader>
             <TableBody>
               {order.map((row) => (
-                <EditableRow key={row.id} row={row} />
+                <EditableRow key={row.id} row={row} transformations={order} />
               ))}
             </TableBody>
           </Table>
@@ -163,7 +185,8 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
 // the immediate variant since a discrete choice has no mid-edit state to debounce.
 const DEBOUNCED_AUTOSAVE_MS = 500;
 
-function EditableRow({ row }: { row: TransformationRow }) {
+function EditableRow({ row, transformations }: { row: TransformationRow; transformations: TransformationRow[] }) {
+  const gateSourceOptions = transformations.filter((t) => t.id !== row.id).map((t) => t.name);
   const fetcher = useFetcher();
   const sortable = useSortable({ id: row.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
@@ -218,6 +241,18 @@ function EditableRow({ row }: { row: TransformationRow }) {
         </TableCell>
         <TableCell>{row.position}</TableCell>
         <TableCell>
+          <form.Field name="name" listeners={debounced}>
+            {(field) => (
+              <Input
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+                placeholder="name"
+              />
+            )}
+          </form.Field>
+        </TableCell>
+        <TableCell>
           <form.Field name="type" listeners={{ onChange: () => form.handleSubmit() }}>
             {(field) => (
               <Select
@@ -268,7 +303,7 @@ function EditableRow({ row }: { row: TransformationRow }) {
       </TableRow>
       {expanded && (
         <TableRow>
-          <TableCell colSpan={6} className="bg-muted/30">
+          <TableCell colSpan={7} className="bg-muted/30">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">Prompt</span>
@@ -288,11 +323,62 @@ function EditableRow({ row }: { row: TransformationRow }) {
                   {(field) => <ParamsFields value={field.state.value} onChange={field.handleChange} />}
                 </form.Field>
               </div>
+              <div className="flex flex-col gap-1 md:col-span-2">
+                <span className="text-xs text-muted-foreground">Gate</span>
+                <form.Field name="gate" listeners={debounced}>
+                  {(field) => (
+                    <GateFields value={field.state.value} onChange={field.handleChange} sourceOptions={gateSourceOptions} />
+                  )}
+                </form.Field>
+              </div>
             </div>
             {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
           </TableCell>
         </TableRow>
       )}
     </>
+  );
+}
+
+function GateFields({
+  value,
+  onChange,
+  sourceOptions,
+}: {
+  value: GateDraft | null;
+  onChange: (next: GateDraft | null) => void;
+  sourceOptions: string[];
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={value !== null}
+          onChange={(e) =>
+            onChange(e.target.checked ? { source: sourceOptions[0] ?? "", field: "", op: GATE_OPS[0], value: "" } : null)
+          }
+        />
+        Add gate
+      </label>
+      {value && (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Select value={value.source} onValueChange={(source) => source && onChange({ ...value, source })}>
+            <SelectTrigger><SelectValue placeholder="source" /></SelectTrigger>
+            <SelectContent>
+              {sourceOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input value={value.field} onChange={(e) => onChange({ ...value, field: e.target.value })} placeholder="field" />
+          <Select value={value.op} onValueChange={(op) => op && onChange({ ...value, op })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {GATE_OPS.map((op) => <SelectItem key={op} value={op}>{op}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input value={value.value} onChange={(e) => onChange({ ...value, value: e.target.value })} placeholder="value" />
+        </div>
+      )}
+    </div>
   );
 }

@@ -27,6 +27,10 @@ pg_password = cfg.require_secret("pgPassword")  # keep URL-safe (alphanumeric)
 neo4j_password = cfg.require_secret("neo4jPassword")
 openrouter_key = cfg.require_secret("openrouterApiKey")
 tunnel_token = cfg.get_secret("tunnelToken")  # optional — omit to skip the tunnel
+resend_api_key = cfg.get_secret("resendApiKey")  # optional — mailer logs instead of sending if unset
+auth_email_from = cfg.get("authEmailFrom") or "noreply@mail.sinpi.software"
+app_base_url = cfg.get("appBaseUrl") or "https://desk.sinpi.software"
+app_origins = cfg.get("appOrigins") or "https://desk.sinpi.software"
 
 
 def meta(name: str) -> dict:
@@ -61,6 +65,11 @@ app_secret = k8s.core.v1.Secret(
         "INGESTION_NEO4J_USER": "neo4j",
         "INGESTION_NEO4J_PASSWORD": neo4j_password,
         "INGESTION_OPENROUTER_API_KEY": openrouter_key,
+        # user-auth / email (mailer.py, accounts.py)
+        "RESEND_API_KEY": resend_api_key if resend_api_key is not None else "",
+        "AUTH_EMAIL_FROM": auth_email_from,
+        "APP_BASE_URL": app_base_url,
+        "APP_ORIGINS": app_origins,
     },
     opts=ns_opts,
 )
@@ -263,7 +272,7 @@ api_hostname = cfg.get("apiHostname")
 if api_hostname:
     api_paths = [
         {"path": p, "pathType": "Prefix", "backend": {"service": {"name": "ingestion-api", "port": {"number": 80}}}}
-        for p in ("/content", "/config", "/graphql", "/docs", "/redoc", "/openapi.json")
+        for p in ("/content", "/config", "/graphql", "/docs", "/redoc", "/openapi.json", "/api")
     ]
     marketing_path = {
         "path": "/",

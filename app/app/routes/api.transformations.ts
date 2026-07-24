@@ -1,6 +1,11 @@
 import type { Route } from "./+types/api.transformations";
 import { reorderSchema, transformationInputSchema } from "~/schemas/transformation";
-import { createTransformation, listTransformations, reorderTransformations } from "~/services/transformations.server";
+import {
+  createTransformation,
+  listTransformations,
+  reorderTransformations,
+  TransformationValidationError,
+} from "~/services/transformations.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const orgId = new URL(request.url).searchParams.get("org_id");
@@ -26,7 +31,10 @@ export async function action({ request }: Route.ActionArgs) {
     if (!parsed.success) return Response.json({ errors: parsed.error.flatten() }, { status: 422 });
     try {
       return Response.json(await createTransformation(orgId, parsed.data), { status: 201 });
-    } catch {
+    } catch (err) {
+      if (err instanceof TransformationValidationError) {
+        return Response.json({ error: err.message, field: err.field }, { status: 422 });
+      }
       return Response.json({ error: "request failed" }, { status: 500 });
     }
   }

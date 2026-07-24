@@ -104,6 +104,12 @@ function fetcherFailed(data: unknown): boolean {
   return Boolean(error || errors);
 }
 
+function fetcherErrorMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const { error } = data as { error?: unknown };
+  return typeof error === "string" ? error : null;
+}
+
 export default function TransformationsPage({ loaderData }: Route.ComponentProps) {
   const { orgId, transformations } = loaderData;
   const addFetcher = useFetcher();
@@ -186,7 +192,7 @@ export default function TransformationsPage({ loaderData }: Route.ComponentProps
 const DEBOUNCED_AUTOSAVE_MS = 500;
 
 function EditableRow({ row, transformations }: { row: TransformationRow; transformations: TransformationRow[] }) {
-  const gateSourceOptions = transformations.filter((t) => t.id !== row.id).map((t) => t.name);
+  const gateSourceOptions = transformations.filter((t) => t.position < row.position).map((t) => t.name);
   const fetcher = useFetcher();
   const sortable = useSortable({ id: row.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
@@ -215,7 +221,12 @@ function EditableRow({ row, transformations }: { row: TransformationRow; transfo
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcherFailed(fetcher.data)) {
-      toast.error("Couldn't save — try again");
+      const message = fetcherErrorMessage(fetcher.data);
+      if (message) {
+        setError(message);
+      } else {
+        toast.error("Couldn't save — try again");
+      }
     }
   }, [fetcher.state, fetcher.data]);
 

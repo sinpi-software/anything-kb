@@ -1,6 +1,6 @@
 import type { Route } from "./+types/api.transformations.$id";
 import { transformationInputSchema } from "~/schemas/transformation";
-import { deleteTransformation, updateTransformation } from "~/services/transformations.server";
+import { deleteTransformation, TransformationValidationError, updateTransformation } from "~/services/transformations.server";
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { id } = params;
@@ -18,7 +18,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       const row = await updateTransformation(id, parsed.data);
       if (!row) return Response.json({ error: "not found" }, { status: 404 });
       return Response.json(row);
-    } catch {
+    } catch (err) {
+      if (err instanceof TransformationValidationError) {
+        return Response.json({ error: err.message, field: err.field }, { status: 422 });
+      }
       return Response.json({ error: "request failed" }, { status: 500 });
     }
   }

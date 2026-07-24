@@ -67,3 +67,21 @@ jobs:
       # Validate the image builds; the real build+push happens on the node during deploy.
       - name: Build ingestion image (no push)
         run: docker build -t anything-ingestion:ci ingestion
+
+  web:
+    name: typecheck + build (web)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run build

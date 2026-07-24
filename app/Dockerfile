@@ -1,22 +1,24 @@
-FROM node:24-alpine AS development-dependencies-env
-COPY . /app
+# React Router 8 SSR app (Node server). Build target: linux/amd64.
+FROM node:24-alpine AS build
+RUN corepack enable
 WORKDIR /app
-RUN npm ci
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm run build
 
-FROM node:24-alpine AS production-dependencies-env
-COPY ./package.json package-lock.json /app/
+FROM node:24-alpine AS prod-deps
+RUN corepack enable
 WORKDIR /app
-RUN npm ci --omit=dev
-
-FROM node:24-alpine AS build-env
-COPY . /app/
-COPY --from=development-dependencies-env /app/node_modules /app/node_modules
-WORKDIR /app
-RUN npm run build
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
 
 FROM node:24-alpine
-COPY ./package.json package-lock.json /app/
-COPY --from=production-dependencies-env /app/node_modules /app/node_modules
-COPY --from=build-env /app/build /app/build
+RUN corepack enable
 WORKDIR /app
-CMD ["npm", "run", "start"]
+ENV NODE_ENV=production PORT=3000
+COPY package.json pnpm-lock.yaml ./
+COPY --from=prod-deps /app/node_modules /app/node_modules
+COPY --from=build /app/build /app/build
+EXPOSE 3000
+CMD ["pnpm", "run", "start"]

@@ -30,7 +30,8 @@ matters, entities and relationships are extracted into a typed graph, and you re
 over GraphQL.
 
 **Authentication** — every endpoint takes your API key as a Bearer token
-(`Authorization: Bearer <key>`). Click **Authorize** to try requests from this page.
+(`Authorization: Bearer <key>`). Click **Authorize**, paste your key, and try requests
+right from this page.
 
 **GraphQL** — the read API and an interactive explorer live at [`/graphql`](/graphql).
 """
@@ -48,8 +49,8 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=TAGS_METADATA,
     lifespan=lifespan,
-    docs_url=None,  # Swagger UI off — ReDoc is the docs
-    redoc_url="/docs",  # serve ReDoc at /docs
+    docs_url="/docs",  # Swagger UI (interactive: Authorize + Try it out) at /docs
+    redoc_url=None,  # ReDoc off
 )
 app.include_router(content_router)
 app.include_router(config_router)

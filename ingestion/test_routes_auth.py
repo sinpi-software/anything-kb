@@ -54,7 +54,9 @@ def client() -> Iterator[TestClient]:
     app.include_router(router)
     # base_url must be https:// — the session cookie is Secure, so httpx's cookie jar
     # only attaches it back on an https connection (matching real browser behavior).
-    yield TestClient(app, base_url="https://testserver")
+    # A default Origin header keeps setup calls (register/login) past require_csrf,
+    # since it's an allowed localhost origin — same as our real SPA would send.
+    yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
 def _unique_email() -> str:
@@ -147,8 +149,30 @@ def test_logout_requires_csrf_origin(client: TestClient) -> None:
     email = _unique_email()
     try:
         client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+        del client.headers["origin"]  # the fixture's default Origin would otherwise pass the check
         resp = client.post("/api/auth/logout")  # no Origin header
         assert resp.status_code == 403
+    finally:
+        _purge_user(email)
+
+
+@requires_pg
+def test_login_requires_csrf_origin(client: TestClient) -> None:
+    """POST /login sets a session cookie, so it's a login-CSRF vector: without an
+    Origin check, an attacker could plant their own session in a victim's browser."""
+    email = _unique_email()
+    try:
+        client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+
+        bad_origin = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "hunter22"},
+            headers={"Origin": "https://evil.example"},
+        )
+        assert bad_origin.status_code == 403
+
+        good_origin = client.post("/api/auth/login", json={"email": email, "password": "hunter22"})
+        assert good_origin.status_code == 200
     finally:
         _purge_user(email)
 

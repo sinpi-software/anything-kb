@@ -70,7 +70,9 @@ def _send_verification_email(session: OrmSession, user: User) -> None:
         session.rollback()
 
 
-@router.post("/register", response_model=MeResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=MeResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_csrf)]
+)
 def register(payload: RegisterRequest, response: Response) -> MeResponse:
     """Create a user, auto-create an org owned by them (so they immediately have
     somewhere to hold API keys), log them in, and best-effort send a verification email."""
@@ -117,7 +119,7 @@ def register(payload: RegisterRequest, response: Response) -> MeResponse:
     return me
 
 
-@router.post("/login", response_model=MeResponse)
+@router.post("/login", response_model=MeResponse, dependencies=[Depends(require_csrf)])
 def login(payload: LoginRequest, response: Response) -> MeResponse:
     with get_postgres_session() as session:
         user = session.query(User).filter(User.email == payload.email.strip().lower()).one_or_none()

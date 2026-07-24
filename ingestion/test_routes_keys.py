@@ -56,7 +56,9 @@ def client() -> Iterator[TestClient]:
     app.include_router(keys_router)
     # base_url must be https:// — the session cookie is Secure, so httpx's cookie jar
     # only attaches it back on an https connection (matching real browser behavior).
-    yield TestClient(app, base_url="https://testserver")
+    # A default Origin header keeps setup calls (register/login) past require_csrf,
+    # since it's an allowed localhost origin — same as our real SPA would send.
+    yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
 def _unique_email() -> str:
@@ -91,6 +93,7 @@ def test_create_key_requires_csrf_origin(client: TestClient) -> None:
     email = _unique_email()
     try:
         _register_and_verify(client, email)
+        del client.headers["origin"]  # the fixture's default Origin would otherwise pass the check
         resp = client.post("/api/keys", json={"name": "my key"})  # no Origin
         assert resp.status_code == 403
     finally:

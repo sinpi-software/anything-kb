@@ -77,3 +77,24 @@ export const createKey = (name: string): Promise<CreatedApiKey> =>
 
 export const revokeKey = (id: string): Promise<void> =>
   apiFetch<void>(`/keys/${id}`, { method: "DELETE" });
+
+export interface JobAccepted {
+  job_id: string;
+}
+
+export type JobStatusValue = "pending" | "processing" | "done" | "skipped" | "failed";
+
+export interface JobStatus {
+  job_id: string;
+  status: JobStatusValue;
+  relevance_reason: string | null;
+  error: string | null;
+}
+
+export const ingestContent = (text: string, source?: string): Promise<JobAccepted> =>
+  apiFetch<JobAccepted>("/content", {
+    method: "POST",
+    body: JSON.stringify({ text, metadata: source ? { source } : {} }),
+  });
+
+export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>(`/content/${jobId}`);

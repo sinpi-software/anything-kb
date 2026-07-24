@@ -8,4 +8,5 @@ export default [
   route("reset-password/:token", "routes/reset-password.tsx"),
   route("verify-email/:token", "routes/verify-email.tsx"),
   route("app", "routes/dashboard.tsx"),
+  route("app/ingest", "routes/ingest.tsx"),
 ] satisfies RouteConfig;

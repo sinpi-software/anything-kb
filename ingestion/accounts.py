@@ -131,6 +131,20 @@ def current_user(request: Request) -> User:
     return user
 
 
+def home_knowledge_base_id(session: OrmSession, user_id: Any) -> str | None:
+    """The knowledge base a user's cookie-authenticated actions belong to: the earliest one
+    they were added to (registration auto-creates one, so normally their only knowledge base)."""
+    from models import KnowledgeBaseUser
+
+    row = (
+        session.query(KnowledgeBaseUser.knowledge_base_id)
+        .filter(KnowledgeBaseUser.user_id == user_id)
+        .order_by(KnowledgeBaseUser.created_at.asc())
+        .first()
+    )
+    return str(row[0]) if row is not None else None
+
+
 # Dev: any localhost/127.0.0.1 origin. Prod: APP_ORIGINS (comma-separated).
 _LOCALHOST_ORIGIN_RE = re.compile(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$")
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

@@ -15,6 +15,7 @@ from neo4j_client import bootstrap_schema  # noqa: E402
 from routes_auth import router as auth_router  # noqa: E402
 from routes_config import router as config_router  # noqa: E402
 from routes_content import router as content_router  # noqa: E402
+from routes_ingest import router as ingest_router  # noqa: E402
 from routes_keys import router as keys_router  # noqa: E402
 
 
@@ -57,6 +58,7 @@ app.include_router(config_router)
 app.include_router(graphql_router, prefix="/graphql")
 app.include_router(auth_router)
 app.include_router(keys_router)
+app.include_router(ingest_router)
 
 
 if __name__ == "__main__":

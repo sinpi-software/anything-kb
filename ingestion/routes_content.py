@@ -1,26 +1,14 @@
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import require_knowledge_base
 from db import get_postgres_session
 from models import IngestJob
-from sanitize import sanitize
+from sanitize import sanitize, sanitize_json
 from schemas import ContentAccepted, ContentRequest, JobStatusResponse
 
 router = APIRouter()
-
-
-def _sanitize_json(value: Any) -> Any:
-    """Recursively apply `sanitize` to every string in a JSON-like structure."""
-    if isinstance(value, str):
-        return sanitize(value)
-    if isinstance(value, dict):
-        return {k: _sanitize_json(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_json(v) for v in value]
-    return value
 
 
 @router.post(
@@ -41,7 +29,7 @@ def post_content(body: ContentRequest, knowledge_base_id: str = Depends(require_
         job = IngestJob(
             knowledge_base_id=knowledge_base_id,
             content=sanitize(body.text),
-            job_metadata=_sanitize_json(body.metadata),
+            job_metadata=sanitize_json(body.metadata),
         )
         session.add(job)
         session.flush()

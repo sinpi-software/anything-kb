@@ -1,15 +1,16 @@
-import { KeyRound, LogOut, Trash2 } from "lucide-react";
+import { KeyRound, LogOut, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
-import { redirect, useNavigate, useRevalidator } from "react-router";
+import { Link, redirect, useNavigate, useRevalidator } from "react-router";
 
 import { CopyButton } from "~/components/copy-button";
 import { SiteHeader } from "~/components/site-header";
+import { VerifyEmailBanner } from "~/components/verify-email-banner";
 import { Alert } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
 import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { ApiError, createKey, logout, resendVerification, revokeKey } from "~/lib/api";
+import { ApiError, createKey, logout, revokeKey } from "~/lib/api";
 import { getKeys, getMe } from "~/lib/auth.server";
 import type { ApiKey, CreatedApiKey } from "~/lib/types";
 import { cn } from "~/lib/utils";
@@ -30,43 +31,6 @@ function formatDate(value: string | null): string {
   if (!value) return "—";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value),
-  );
-}
-
-function VerifyEmailBanner() {
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  async function handleResend() {
-    setError(null);
-    setSending(true);
-    try {
-      await resendVerification();
-      setSent(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't resend right now.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <Alert variant="error" className="items-center justify-between gap-4">
-      <div className="flex flex-col gap-1">
-        <span className="font-semibold">Verify your email to create an API key.</span>
-        {error ? <span>{error}</span> : null}
-        {sent ? <span>Verification email sent — check your inbox.</span> : null}
-      </div>
-      <Button
-        variant="outline"
-        onClick={handleResend}
-        disabled={sending || sent}
-        className="flex-none"
-      >
-        {sending ? "Sending…" : sent ? "Sent" : "Resend email"}
-      </Button>
-    </Alert>
   );
 }
 
@@ -204,10 +168,16 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     <div className="min-h-svh">
       <SiteHeader
         actions={
-          <Button variant="outline" onClick={handleLogout} className="text-sm">
-            <LogOut className="size-3.5" aria-hidden="true" />
-            Log out
-          </Button>
+          <>
+            <Button variant="outline" render={<Link to="/app/ingest" />} className="text-sm">
+              <Upload className="size-3.5" aria-hidden="true" />
+              Ingest content
+            </Button>
+            <Button variant="outline" onClick={handleLogout} className="text-sm">
+              <LogOut className="size-3.5" aria-hidden="true" />
+              Log out
+            </Button>
+          </>
         }
       />
       <main className="mx-auto max-w-(--maxw) px-7 py-12">
@@ -218,7 +188,9 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         {primaryKnowledgeBase ? <p className="mt-1 text-muted">{primaryKnowledgeBase.knowledge_base_name}</p> : null}
 
         <div className="mt-8 flex flex-col gap-6">
-          {!me.email_verified ? <VerifyEmailBanner /> : null}
+          {!me.email_verified ? (
+            <VerifyEmailBanner message="Verify your email to create an API key." />
+          ) : null}
           {createdKey ? (
             <CreatedKeyCallout created={createdKey} onDismiss={() => setCreatedKey(null)} />
           ) : null}

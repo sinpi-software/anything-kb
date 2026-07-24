@@ -6,33 +6,19 @@ freshly created key authenticates against /content, /config, /graphql immediatel
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session as OrmSession
 
-from accounts import current_user, require_csrf
+from accounts import current_user, home_knowledge_base_id, require_csrf
 from auth import generate_api_key, hash_key
 from db import get_postgres_session
-from models import ApiKey, KnowledgeBaseUser, User
+from models import ApiKey, User
 from schemas import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyOut
 
 router = APIRouter(prefix="/api/keys", tags=["API keys"], dependencies=[Depends(require_csrf)])
 
 # Chars of the raw key shown back to the caller in the masked listing, e.g. "OaK3f9YbZ1".
 KEY_PREFIX_LENGTH = 10
-
-
-def _home_knowledge_base_id(session: OrmSession, user_id: Any) -> str | None:
-    """The knowledge_base a user's API keys belong to: the earliest knowledge_base they were added to
-    (registration auto-creates one, so this is normally their only knowledge_base)."""
-    row = (
-        session.query(KnowledgeBaseUser.knowledge_base_id)
-        .filter(KnowledgeBaseUser.user_id == user_id)
-        .order_by(KnowledgeBaseUser.created_at.asc())
-        .first()
-    )
-    return str(row[0]) if row is not None else None
 
 
 @router.post("", response_model=ApiKeyCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -43,7 +29,7 @@ def create_key(
     if not user.email_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="verify your email to create an API key")
     with get_postgres_session() as session:
-        knowledge_base_id = _home_knowledge_base_id(session, user.id)
+        knowledge_base_id = home_knowledge_base_id(session, user.id)
         if knowledge_base_id is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="no knowledge_base found for this account"
@@ -67,7 +53,7 @@ def create_key(
 @router.get("", response_model=list[ApiKeyOut])
 def list_keys(user: User = Depends(current_user)) -> list[ApiKeyOut]:  # noqa: B008 — FastAPI dependency idiom
     with get_postgres_session() as session:
-        knowledge_base_id = _home_knowledge_base_id(session, user.id)
+        knowledge_base_id = home_knowledge_base_id(session, user.id)
         if knowledge_base_id is None:
             return []
         rows = (
@@ -96,7 +82,7 @@ def revoke_key(key_id: str, user: User = Depends(current_user)) -> None:  # noqa
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from None
     with get_postgres_session() as session:
-        knowledge_base_id = _home_knowledge_base_id(session, user.id)
+        knowledge_base_id = home_knowledge_base_id(session, user.id)
         key = session.get(ApiKey, key_id) if knowledge_base_id is not None else None
         if key is None or str(key.knowledge_base_id) != knowledge_base_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")

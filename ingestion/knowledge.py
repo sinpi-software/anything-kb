@@ -1,5 +1,7 @@
+import os
 import re
 import threading
+import uuid
 from typing import Any
 
 from neo4j import Session
@@ -7,6 +9,7 @@ from openrouter import OpenRouter
 from pydantic import BaseModel
 
 import config
+from neo4j_client import get_neo4j_session
 
 # Bounds concurrent OpenRouter calls in place of the old Prefect concurrency pool.
 _llm_semaphore = threading.Semaphore(config.LLM_CONCURRENCY)
@@ -59,12 +62,15 @@ def _chat(
     return content if isinstance(content, str) else None
 
 
-def build_extraction_messages(prompt: str, entity_types: list[str], text: str) -> list[dict[str, str]]:
+def build_extraction_messages(
+    entity_types: list[str], relationship_types: list[str], text: str
+) -> list[dict[str, str]]:
     system = (
-        f"{prompt}\n\nExtract only entities of these types: {', '.join(entity_types)}. "
+        f"Extract only entities of these types: {', '.join(entity_types)}. "
         "For each entity, write a thorough, self-contained description capturing everything this "
         "article says about it (who/what it is, key facts, context) — a rich paragraph, not a label. "
-        "Also extract relationships between them, each with a concise UPPER_SNAKE_CASE type."
+        f"Also extract relationships between them, using only these relationship types: "
+        f"{', '.join(relationship_types)}. Use the exact type strings given; do not invent new ones."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
@@ -88,8 +94,8 @@ def _strict_schema(node: Any) -> Any:
 def extract_knowledge(
     client: OpenRouter,
     model: str,
-    prompt: str,
     entity_types: list[str],
+    relationship_types: list[str],
     text: str,
     llm_params: dict[str, Any],
 ) -> KnowledgeExtraction:
@@ -101,7 +107,8 @@ def extract_knowledge(
             "schema": _strict_schema(KnowledgeExtraction.model_json_schema()),
         },
     }
-    content = _chat(client, model, build_extraction_messages(prompt, entity_types, text), llm_params, schema)
+    messages = build_extraction_messages(entity_types, relationship_types, text)
+    content = _chat(client, model, messages, llm_params, schema)
     if content is None:
         raise ValueError("LLM returned no text content")
     return KnowledgeExtraction.model_validate_json(content)
@@ -236,25 +243,75 @@ def upsert_entity(session: Session, org_id: str, entity_id: str, entity: Extract
 
 
 def write_relationship(
-    session: Session, org_id: str, source_id: str, target_id: str, rel_type: str, artifact_id: str
+    session: Session, org_id: str, source_id: str, target_id: str, rel_type: str, job_id: str
 ) -> None:
     session.run(
         "MATCH (a:Entity {id: $source_id, org_id: $org_id}), (b:Entity {id: $target_id, org_id: $org_id}) "
         "MERGE (a)-[r:RELATED {type: $rel_type, org_id: $org_id}]->(b) "
-        "ON CREATE SET r.source_artifact_id = $artifact_id, r.created_at = datetime()",
+        "ON CREATE SET r.source_job_id = $job_id, r.created_at = datetime()",
         {
             "source_id": source_id,
             "target_id": target_id,
             "org_id": org_id,
             "rel_type": rel_type,
-            "artifact_id": artifact_id,
+            "job_id": job_id,
         },
     )
 
 
-def write_provenance(session: Session, org_id: str, entity_id: str, artifact_id: str) -> None:
+def write_provenance(session: Session, org_id: str, entity_id: str, job_id: str) -> None:
     session.run(
-        "MERGE (s:Source {org_id: $org_id, artifact_id: $artifact_id}) "
+        "MERGE (s:Source {org_id: $org_id, job_id: $job_id}) "
         "WITH s MATCH (e:Entity {id: $entity_id, org_id: $org_id}) MERGE (e)-[:MENTIONED_IN]->(s)",
-        {"org_id": org_id, "artifact_id": artifact_id, "entity_id": entity_id},
+        {"org_id": org_id, "job_id": job_id, "entity_id": entity_id},
     )
+
+
+class MergeResult(BaseModel):
+    entities_created: int
+    entities_merged: int
+    relationships_created: int
+
+
+def merge_content(
+    org_id: str,
+    content: str,
+    entity_types: list[str],
+    relationship_types: list[str],
+    job_id: str,
+) -> MergeResult:
+    allowed_entities = {t.lower() for t in entity_types}
+    allowed_rels = {t.upper() for t in relationship_types}
+    llm_params: dict[str, Any] = {}
+    created = merged = rels = 0
+    name_to_id: dict[str, str] = {}
+    with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
+        extraction = extract_knowledge(client, config.LLM_MODEL, entity_types, relationship_types, content, llm_params)
+        entities = [e for e in extraction.entities if e.type.lower() in allowed_entities]
+        resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, org_id, entities, llm_params)
+        for entity, existing_id in zip(entities, resolved_ids, strict=True):
+            if existing_id is None:
+                entity_id, summary = str(uuid.uuid4()), entity.description
+                created += 1
+            else:
+                entity_id = existing_id
+                row = neo.run(
+                    "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
+                    {"id": entity_id, "org_id": org_id},
+                ).single()
+                existing_summary = row["s"] if row else ""
+                summary = merge_summary(client, config.LLM_MODEL, existing_summary, entity.description, llm_params)
+                merged += 1
+            upsert_entity(neo, org_id, entity_id, entity, summary)
+            write_provenance(neo, org_id, entity_id, job_id)
+            name_to_id[normalize_name(entity.name)] = entity_id
+
+        for rel in extraction.relationships:
+            if rel.type.upper() not in allowed_rels:
+                continue
+            src = name_to_id.get(normalize_name(rel.source_name))
+            tgt = name_to_id.get(normalize_name(rel.target_name))
+            if src and tgt:
+                write_relationship(neo, org_id, src, tgt, rel.type, job_id)
+                rels += 1
+    return MergeResult(entities_created=created, entities_merged=merged, relationships_created=rels)

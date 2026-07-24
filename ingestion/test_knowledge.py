@@ -18,11 +18,14 @@ import knowledge as knowledge_mod  # noqa: E402
 from db import get_postgres_session  # noqa: E402
 from knowledge import (  # noqa: E402
     ExtractedEntity,
+    ExtractedRelationship,
     KnowledgeExtraction,
+    MergeResult,
     build_extraction_messages,
     candidate_query,
     escape_lucene,
     fulltext_candidate_query,
+    merge_content,
     normalize_name,
     upsert_entity,
     write_provenance,
@@ -84,10 +87,11 @@ def test_extraction_defaults_aliases_empty() -> None:
     assert e.aliases == []
 
 
-def test_build_extraction_messages_includes_entity_types_and_text() -> None:
-    msgs = build_extraction_messages("Find entities.", ["Person", "Place"], "Some article")
+def test_build_extraction_messages_includes_entity_and_relationship_types() -> None:
+    msgs = build_extraction_messages(["Person", "Place"], ["KNOWS", "BORN_IN"], "Some article")
     joined = " ".join(m["content"] for m in msgs)
     assert "Person" in joined and "Place" in joined
+    assert "KNOWS" in joined and "BORN_IN" in joined
     assert "Some article" in joined
     assert msgs[0]["role"] == "system"
     assert msgs[-1]["role"] == "user"
@@ -300,3 +304,57 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_org_scoped() -> N
     finally:
         _cleanup(org_a)
         _cleanup(org_b)
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    bootstrap_schema()
+    extraction = KnowledgeExtraction(
+        entities=[
+            ExtractedEntity(name="Ada", type="Person", description="Mathematician"),
+            ExtractedEntity(name="Engine", type="Thing", description="A machine"),
+            ExtractedEntity(name="Rover", type="Robot", description="Off-list entity type"),
+        ],
+        relationships=[
+            ExtractedRelationship(source_name="Ada", target_name="Engine", type="WORKED_ON"),
+            # Off-list relationship type — must be dropped.
+            ExtractedRelationship(source_name="Ada", target_name="Engine", type="HATES"),
+        ],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    org_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(org_id, "Ada worked on the Engine.", ["Person", "Thing"], ["WORKED_ON"], job_id)
+        assert isinstance(result, MergeResult)
+        assert result.entities_created == 2  # Rover filtered
+        assert result.relationships_created == 1  # HATES filtered
+        with get_neo4j_session() as neo:
+            ecount = neo.run("MATCH (e:Entity {org_id: $o}) RETURN count(e) AS c", {"o": org_id}).single(True)["c"]
+            assert ecount == 2
+            rel = neo.run(
+                "MATCH (:Entity {org_id: $o})-[r:RELATED]->() RETURN r.type AS t, r.source_job_id AS j",
+                {"o": org_id},
+            ).single(True)
+            assert rel["t"] == "WORKED_ON"
+            assert rel["j"] == job_id
+            src = neo.run(
+                "MATCH (:Entity {org_id: $o})-[:MENTIONED_IN]->(s:Source) RETURN s.job_id AS j LIMIT 1",
+                {"o": org_id},
+            ).single(True)
+            assert src["j"] == job_id
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.org_id = $o DETACH DELETE n", {"o": org_id})

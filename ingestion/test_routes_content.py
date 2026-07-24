@@ -70,6 +70,44 @@ def test_get_content_reflects_status(client_and_org) -> None:  # type: ignore[no
 
 
 @requires_pg
+def test_post_content_with_nul_in_text_is_sanitized(client_and_org) -> None:  # type: ignore[no-untyped-def]
+    client, _org_id, key = client_and_org
+    resp = client.post("/content", json={"text": "foo\x00bar"}, headers={"Authorization": f"Bearer {key}"})
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    from db import get_postgres_session
+    from models import IngestJob
+
+    with get_postgres_session() as s:
+        job = s.get(IngestJob, job_id)
+        assert job is not None
+        assert "\x00" not in job.content
+        assert job.content == "foobar"
+
+
+@requires_pg
+def test_post_content_with_nul_in_metadata_is_not_500(client_and_org) -> None:  # type: ignore[no-untyped-def]
+    client, _org_id, key = client_and_org
+    resp = client.post(
+        "/content",
+        json={"text": "hello", "metadata": {"source": "foo\x00bar"}},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code in (202, 422)
+    if resp.status_code == 202:
+        job_id = resp.json()["job_id"]
+
+        from db import get_postgres_session
+        from models import IngestJob
+
+        with get_postgres_session() as s:
+            job = s.get(IngestJob, job_id)
+            assert job is not None
+            assert "\x00" not in (job.job_metadata or {}).get("source", "")
+
+
+@requires_pg
 def test_missing_auth_is_401(client_and_org) -> None:  # type: ignore[no-untyped-def]
     client, _org_id, _key = client_and_org
     assert client.post("/content", json={"text": "x"}).status_code == 401

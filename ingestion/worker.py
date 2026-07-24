@@ -11,6 +11,7 @@ import config as config  # re-exported so tests can monkeypatch worker.config.WO
 from db import get_postgres_session
 from knowledge import merge_content
 from models import IngestJob, JobStatus, OrgConfig
+from neo4j_client import bootstrap_schema
 from relevance import judge_relevance
 
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,6 +100,7 @@ def run_once() -> int:
 
 
 def main() -> None:
+    bootstrap_schema()
     while True:
         try:
             processed = run_once()

@@ -16,6 +16,10 @@ NEO4J_URI_ENV = "INGESTION_NEO4J_URI"
 NEO4J_USER_ENV = "INGESTION_NEO4J_USER"
 NEO4J_PASSWORD_ENV = "INGESTION_NEO4J_PASSWORD"
 
+# --- GraphQL ---
+# Hard cap on `nodes(limit:)` regardless of what a caller requests.
+NODES_MAX_LIMIT = 500
+
 # --- Worker ---
 # Jobs claimed per loop iteration (FOR UPDATE SKIP LOCKED batch size).
 WORKER_BATCH_SIZE = 5

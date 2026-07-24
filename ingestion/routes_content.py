@@ -1,19 +1,36 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import require_org
 from db import get_postgres_session
 from models import IngestJob
+from sanitize import sanitize
 from schemas import ContentAccepted, ContentRequest, JobStatusResponse
 
 router = APIRouter()
 
 
+def _sanitize_json(value: Any) -> Any:
+    """Recursively apply `sanitize` to every string in a JSON-like structure."""
+    if isinstance(value, str):
+        return sanitize(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json(v) for v in value]
+    return value
+
+
 @router.post("/content", status_code=status.HTTP_202_ACCEPTED, response_model=ContentAccepted)
 def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> ContentAccepted:
     with get_postgres_session() as session:
-        job = IngestJob(org_id=org_id, content=body.text, job_metadata=body.metadata)
+        job = IngestJob(
+            org_id=org_id,
+            content=sanitize(body.text),
+            job_metadata=_sanitize_json(body.metadata),
+        )
         session.add(job)
         session.flush()
         job_id = str(job.id)

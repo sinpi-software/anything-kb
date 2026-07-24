@@ -10,6 +10,7 @@ os.environ.setdefault("INGESTION_POSTGRES_URL", "postgresql://ingestion:ingestio
 import pytest
 from sqlalchemy import text as sqltext
 
+import config
 from graph_read import query_edges
 from knowledge import ExtractedEntity, upsert_entity, write_relationship
 from neo4j_client import bootstrap_schema, get_neo4j_session
@@ -107,6 +108,17 @@ def test_nodes_lists_only_callers_org(seeded) -> None:  # type: ignore[no-untype
     resp = _gql(client, key, "{ nodes { name type } }")
     names = {n["name"] for n in resp.json()["data"]["nodes"]}
     assert names == {"Ada", "Engine"}  # org_b's "Secret" is invisible
+
+
+@requires_stack
+def test_nodes_limit_is_clamped(monkeypatch: pytest.MonkeyPatch, seeded) -> None:  # type: ignore[no-untyped-def]
+    # org_a has 2 seeded entities (Ada, Engine). Clamp the cap to 1 and request a huge
+    # limit: a caller-requested 100000 must never reach Cypher; the server-side cap wins.
+    monkeypatch.setattr(config, "NODES_MAX_LIMIT", 1)
+    client, key, _org, _ada, _eng, _org_b, _secret = seeded
+    resp = _gql(client, key, "{ nodes(limit: 100000) { name } }")
+    assert resp.status_code == 200
+    assert len(resp.json()["data"]["nodes"]) == 1
 
 
 @requires_stack

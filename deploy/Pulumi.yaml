@@ -1,0 +1,9 @@
+name: ingestion-deploy
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: >
+  Deploy the knowledge-graph engine onto a single-node k3s cluster: in-cluster
+  registry, Postgres 16, Neo4j 5, the API + worker, an Alembic migration job,
+  and a Cloudflare Tunnel. State is self-hosted; secrets come from Pulumi config.

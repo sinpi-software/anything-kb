@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.pyc
+# Local Pulumi state (when using `pulumi login --local` / file backend)
+.pulumi/

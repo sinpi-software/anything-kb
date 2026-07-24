@@ -11,6 +11,7 @@ from sqlalchemy import update
 
 import config
 from db import get_postgres_session
+from gates import GATE_OPS, evaluate_gate
 from models import Artifact, Transformation, TransformationType, TransformRun, TransformRunStatus
 
 
@@ -137,7 +138,12 @@ DISPATCH: dict[str, Callable[[str, str], str]] = {
 
 
 def validate_transform_config(
-    transform_type: str, model: str | None, prompt: str, params: dict[str, Any] | None
+    transform_type: str,
+    model: str | None,
+    prompt: str,
+    params: dict[str, Any] | None,
+    name: str = "",
+    gate: dict[str, Any] | None = None,
 ) -> None:
     # Every current type is an LLM transform, so all require a model, a prompt, and valid params.
     if transform_type not in DISPATCH:
@@ -151,6 +157,14 @@ def validate_transform_config(
         if not isinstance(entity_types, list) or not entity_types:
             raise ValueError("knowledge transform requires a non-empty params['entity_types'] list")
     LLMParams.model_validate(params or {})
+    if not name or not name.strip():
+        raise ValueError("transform requires a name")
+    if gate is not None:
+        missing = [k for k in ("source", "field", "op", "value") if k not in gate]
+        if missing:
+            raise ValueError(f"gate missing keys: {missing}")
+        if gate["op"] not in GATE_OPS:
+            raise ValueError(f"gate has unknown op {gate['op']!r}")
 
 
 def _mark_run(run_id: str, status: TransformRunStatus, **fields: Any) -> None:
@@ -174,7 +188,7 @@ def run_transform_pipeline(input_artifact_id: str) -> None:
             logger.warning("Artifact %s has no org; skipping transforms", input_artifact_id)
             return
         transforms = session.query(Transformation).filter_by(org_id=org_id).order_by(Transformation.position).all()
-        pipeline = [(t.id, t.type) for t in transforms]
+        pipeline = [(t.id, t.type, t.name, t.gate) for t in transforms]
 
     if not pipeline:
         logger.info("No transforms configured for org %s", org_id)
@@ -182,17 +196,39 @@ def run_transform_pipeline(input_artifact_id: str) -> None:
 
     logger.info("Running %d transform(s) for org %s on artifact %s", len(pipeline), org_id, input_artifact_id)
 
-    current_input = input_artifact_id
-    for transformation_id, transform_type in pipeline:
+    outputs: dict[str, str] = {}  # transform name -> its output artifact id
+    for transformation_id, transform_type, name, gate in pipeline:
         handler = DISPATCH.get(transform_type)
         if handler is None:
             logger.warning("No handler for transform type %r; skipping", transform_type)
             continue
 
+        if gate:
+            source_name = gate.get("source")
+            source_output_id = outputs.get(source_name) if isinstance(source_name, str) else None
+            source_data = None
+            if source_output_id is not None:
+                with get_postgres_session() as session:
+                    src = session.get(Artifact, source_output_id)
+                    source_data = src.data if src else None
+            passed, reason = evaluate_gate(gate, source_data)
+            if not passed:
+                with get_postgres_session() as session:
+                    run = TransformRun(
+                        transformation_id=transformation_id,
+                        input_artifact_id=input_artifact_id,
+                        status=TransformRunStatus.SKIPPED.value,
+                        error_message=reason,
+                    )
+                    session.add(run)
+                    session.commit()
+                logger.info("Gate closed for %s (%s); halting pipeline", name, reason)
+                break
+
         with get_postgres_session() as session:
             run = TransformRun(
                 transformation_id=transformation_id,
-                input_artifact_id=current_input,
+                input_artifact_id=input_artifact_id,
                 status=TransformRunStatus.RUNNING.value,
             )
             session.add(run)
@@ -201,12 +237,12 @@ def run_transform_pipeline(input_artifact_id: str) -> None:
             session.commit()
 
         try:
-            output_artifact_id = handler(current_input, transformation_id)
+            output_artifact_id = handler(input_artifact_id, transformation_id)
         except Exception as exc:
             _mark_run(run_id, TransformRunStatus.FAILED, error_message=str(exc))
-            logger.warning("Transform %s failed on artifact %s: %s", transformation_id, current_input, exc)
+            logger.warning("Transform %s failed on artifact %s: %s", transformation_id, input_artifact_id, exc)
             break
 
         _mark_run(run_id, TransformRunStatus.COMPLETED, output_artifact_id=output_artifact_id)
-        logger.info("Transform %s produced artifact %s", transformation_id, output_artifact_id)
-        current_input = output_artifact_id
+        outputs[name] = output_artifact_id
+        logger.info("Transform %s (%s) produced artifact %s", transformation_id, name, output_artifact_id)

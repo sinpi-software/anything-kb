@@ -23,9 +23,7 @@ def require_org(authorization: str = Header(default="")) -> str:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     with get_postgres_session() as session:
         row = (
-            session.query(ApiKey)
-            .filter(ApiKey.key_hash == hash_key(token), ApiKey.revoked_at.is_(None))
-            .one_or_none()
+            session.query(ApiKey).filter(ApiKey.key_hash == hash_key(token), ApiKey.revoked_at.is_(None)).one_or_none()
         )
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid api key")

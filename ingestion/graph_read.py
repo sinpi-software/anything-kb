@@ -9,10 +9,7 @@ _NODE_RETURN = "RETURN e.id AS id, e.type AS type, e.name AS name, e.summary AS 
 def query_nodes(org_id: str, type_: str | None, search: str | None, limit: int) -> list[dict[str, Any]]:
     params: dict[str, Any] = {"org_id": org_id, "limit": limit}
     if search:
-        cypher = (
-            "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score "
-            "WHERE e.org_id = $org_id "
-        )
+        cypher = "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score WHERE e.org_id = $org_id "
         params["q"] = escape_lucene(search)
         if type_:
             cypher += "AND e.type = $type "
@@ -38,9 +35,7 @@ def query_node(org_id: str, node_id: str) -> dict[str, Any] | None:
 
 
 def query_edges(org_id: str, node_id: str, type_: str | None) -> list[dict[str, Any]]:
-    cypher = (
-        "MATCH (a:Entity {id: $id, org_id: $org_id})-[r:RELATED {org_id: $org_id}]->(b:Entity {org_id: $org_id}) "
-    )
+    cypher = "MATCH (a:Entity {id: $id, org_id: $org_id})-[r:RELATED {org_id: $org_id}]->(b:Entity {org_id: $org_id}) "
     params: dict[str, Any] = {"id": node_id, "org_id": org_id}
     if type_:
         cypher += "WHERE r.type = $type "

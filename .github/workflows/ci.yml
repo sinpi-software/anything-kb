@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test + lint + type (ingestion)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingestion
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ingestion
+          POSTGRES_PASSWORD: ingestion
+          POSTGRES_DB: ingestion
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ingestion -d ingestion"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/ingestion
+        ports: ["7687:7687", "7474:7474"]
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ingestion 'RETURN 1' || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 20 --health-start-period 40s
+    env:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@localhost:5432/ingestion
+      INGESTION_NEO4J_URI: bolt://localhost:7687
+      INGESTION_NEO4J_USER: neo4j
+      INGESTION_NEO4J_PASSWORD: ingestion
+      INGESTION_OPENROUTER_API_KEY: test-key-not-used
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install deps
+        run: uv sync --frozen
+      - name: Apply migrations (schema for DB-backed tests)
+        run: uv run alembic upgrade head
+      - name: Bootstrap Neo4j schema (fulltext index)
+        run: uv run python -c "from neo4j_client import bootstrap_schema; bootstrap_schema()"
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy .
+      - name: Pytest
+        run: uv run pytest -q
+
+  build:
+    name: build + push image (GHCR)
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ingestion
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/sinpi-software/anything-kb:${{ github.sha }}
+            ghcr.io/sinpi-software/anything-kb:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -17,13 +17,33 @@ interface GraphEdge {
   rel: string;
 }
 
-const HUES: Record<EntityType, string> = {
-  person: "#E39BA3",
-  org: "#77BDB4",
-  product: "#9AA7E0",
-  place: "#AFC88F",
-  topic: "#CDAAD9",
-};
+interface Palette {
+  panel: string;
+  panelInk: string;
+  panelMuted: string;
+  beacon: string;
+  hues: Record<EntityType, string>;
+}
+
+// Read the themed console colors from CSS custom properties so the canvas
+// tracks the active theme (light/dark) instead of hardcoding one.
+function readPalette(): Palette {
+  const s = getComputedStyle(document.documentElement);
+  const v = (name: string) => s.getPropertyValue(name).trim();
+  return {
+    panel: v("--panel"),
+    panelInk: v("--panel-ink"),
+    panelMuted: v("--panel-muted"),
+    beacon: v("--beacon"),
+    hues: {
+      person: v("--t-person"),
+      org: v("--t-org"),
+      product: v("--t-product"),
+      place: v("--t-place"),
+      topic: v("--t-topic"),
+    },
+  };
+}
 
 // normalized layout (0..1), hand-placed for a legible composition
 const NODES: GraphNode[] = [
@@ -63,6 +83,8 @@ export function HeroGraphCanvas() {
     const byId: Record<string, GraphNode & { i: number; ph: number }> = {};
     const nodes = NODES.map((n, i) => ({ ...n, i, ph: i * 1.7 }));
     nodes.forEach((n) => (byId[n.id] = n));
+
+    let palette = readPalette();
 
     let width = 0;
     let height = 0;
@@ -108,7 +130,7 @@ export function HeroGraphCanvas() {
         if (prog <= 0) return;
         const mx = a.x + (b.x - a.x) * prog;
         const my = a.y + (b.y - a.y) * prog;
-        ctx!.strokeStyle = "rgba(233,238,236,0.16)";
+        ctx!.strokeStyle = hexA(palette.panelInk, 0.16);
         ctx!.beginPath();
         ctx!.moveTo(a.x, a.y);
         ctx!.lineTo(mx, my);
@@ -120,9 +142,9 @@ export function HeroGraphCanvas() {
           ctx!.textAlign = "center";
           ctx!.textBaseline = "middle";
           const tw = ctx!.measureText(e.rel).width;
-          ctx!.fillStyle = "rgba(14,21,23,0.82)";
+          ctx!.fillStyle = hexA(palette.panel, 0.82);
           ctx!.fillRect(lx - tw / 2 - 5, ly - 7, tw + 10, 14);
-          ctx!.fillStyle = "rgba(139,156,151,0.95)";
+          ctx!.fillStyle = palette.panelMuted;
           ctx!.fillText(e.rel, lx, ly + 0.5);
         }
       });
@@ -131,23 +153,23 @@ export function HeroGraphCanvas() {
         const p = positions[n.id];
         const na = reduce ? 1 : Math.max(0, Math.min(1, easeIntro * nodes.length - n.i));
         if (na <= 0) return;
-        const col = HUES[n.t];
+        const col = n.key ? palette.beacon : palette.hues[n.t];
         const r = n.key ? 8.5 : 6.5;
         ctx!.beginPath();
-        ctx!.fillStyle = hexA(n.key ? "#E8B341" : col, 0.14 * na);
+        ctx!.fillStyle = hexA(col, 0.14 * na);
         ctx!.arc(p.x, p.y, r + 9, 0, Math.PI * 2);
         ctx!.fill();
         ctx!.beginPath();
-        ctx!.fillStyle = hexA(n.key ? "#E8B341" : col, na);
+        ctx!.fillStyle = hexA(col, na);
         ctx!.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx!.fill();
         ctx!.lineWidth = 1.5;
-        ctx!.strokeStyle = hexA("#0E1517", 0.55 * na);
+        ctx!.strokeStyle = hexA(palette.panel, 0.55 * na);
         ctx!.stroke();
         ctx!.font = '600 11.5px ui-monospace, "SF Mono", Menlo, monospace';
         ctx!.textAlign = "center";
         ctx!.textBaseline = "top";
-        ctx!.fillStyle = hexA("#E9EEEC", 0.92 * na);
+        ctx!.fillStyle = hexA(palette.panelInk, 0.92 * na);
         ctx!.fillText(n.label, p.x, p.y + r + 6);
       });
 
@@ -159,18 +181,31 @@ export function HeroGraphCanvas() {
       if (reduce) frame(performance.now());
     }
 
+    // Re-read the palette when the theme changes (toggle stamps data-theme;
+    // matchMedia fires when the OS preference changes with no explicit choice).
+    function refreshPalette() {
+      palette = readPalette();
+      if (reduce) frame(performance.now());
+    }
+    const darkMq = matchMedia("(prefers-color-scheme: dark)");
+    darkMq.addEventListener("change", refreshPalette);
+    const themeObserver = new MutationObserver(refreshPalette);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
     resize();
     window.addEventListener("resize", handleResize);
     animationFrame = requestAnimationFrame(frame);
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      darkMq.removeEventListener("change", refreshPalette);
+      themeObserver.disconnect();
       cancelAnimationFrame(animationFrame);
     };
   }, []);
 
   return (
-    <div className="relative min-h-[440px] flex-1 self-stretch overflow-hidden rounded-l-2xl border border-r-0 border-panel-line bg-[radial-gradient(120%_100%_at_30%_20%,#16211F_0%,var(--panel)_55%,var(--panel-2)_100%)] max-md:min-h-[360px] max-md:rounded-l-2xl">
+    <div className="relative min-h-[440px] flex-1 self-stretch overflow-hidden rounded-l-2xl border border-r-0 border-panel-line bg-[radial-gradient(120%_100%_at_30%_20%,var(--panel-glow)_0%,var(--panel)_55%,var(--panel-2)_100%)] max-md:min-h-[360px] max-md:rounded-l-2xl">
       <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" />
       <span className="absolute bottom-4 left-4.5 font-display text-xs tracking-[0.16em] text-panel-muted uppercase">
         live graph · your entities, your edges

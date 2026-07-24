@@ -42,26 +42,29 @@
   --accent-fill: #e8b341; /* the beacon — fills the CTA in both themes */
   --accent-ink: #1a1305; /* text on the amber fill */
 
-  /* always-dark console (graph + code) — fixed across themes */
-  --panel: #0e1517;
-  --panel-2: #0b1113;
-  --panel-ink: #e9eeec;
-  --panel-muted: #8b9c97;
-  --panel-line: rgba(233, 238, 236, 0.11);
+  /* console (graph + code) — light variant */
+  --panel: #eef2f1;
+  --panel-2: #e5eae8;
+  --panel-ink: #16221f;
+  --panel-muted: #59655f;
+  --panel-line: rgba(18, 36, 32, 0.12);
+  --panel-glow: #ffffff; /* radial highlight behind the hero graph */
   --beacon: #e8b341;
 
-  /* entity-type hues, muted jewel */
-  --t-person: #e39ba3;
-  --t-org: #77bdb4;
-  --t-product: #9aa7e0;
-  --t-place: #afc88f;
-  --t-topic: #cdaad9;
+  /* entity-type hues — darker jewel for contrast on the light console */
+  --t-person: #b0455a;
+  --t-org: #2b8178;
+  --t-product: #5563b8;
+  --t-place: #5c7d3f;
+  --t-topic: #8a5aa0;
 
   --maxw: 1140px;
 
   color-scheme: light;
 }
 
+/* Dark theme: page chrome + console together. The [data-theme] selectors carry
+   higher specificity than the media query, so an explicit toggle always wins. */
 @media (prefers-color-scheme: dark) {
   :root {
     --ground: #0e1517;
@@ -71,6 +74,17 @@
     --line: rgba(233, 238, 236, 0.12);
     --line-strong: rgba(233, 238, 236, 0.2);
     --accent: #e8b341;
+    --panel: #0e1517;
+    --panel-2: #0b1113;
+    --panel-ink: #e9eeec;
+    --panel-muted: #8b9c97;
+    --panel-line: rgba(233, 238, 236, 0.11);
+    --panel-glow: #16211f;
+    --t-person: #e39ba3;
+    --t-org: #77bdb4;
+    --t-product: #9aa7e0;
+    --t-place: #afc88f;
+    --t-topic: #cdaad9;
     color-scheme: dark;
   }
 }
@@ -83,9 +97,21 @@
   --line: rgba(233, 238, 236, 0.12);
   --line-strong: rgba(233, 238, 236, 0.2);
   --accent: #e8b341;
+  --panel: #0e1517;
+  --panel-2: #0b1113;
+  --panel-ink: #e9eeec;
+  --panel-muted: #8b9c97;
+  --panel-line: rgba(233, 238, 236, 0.11);
+  --panel-glow: #16211f;
+  --t-person: #e39ba3;
+  --t-org: #77bdb4;
+  --t-product: #9aa7e0;
+  --t-place: #afc88f;
+  --t-topic: #cdaad9;
   color-scheme: dark;
 }
 
+/* Light theme override — must re-declare the console so it beats an OS-dark media query. */
 :root[data-theme="light"] {
   --ground: #f2f4f3;
   --surface: #ffffff;
@@ -94,6 +120,17 @@
   --line: rgba(18, 36, 32, 0.12);
   --line-strong: rgba(18, 36, 32, 0.2);
   --accent: #a96e08;
+  --panel: #eef2f1;
+  --panel-2: #e5eae8;
+  --panel-ink: #16221f;
+  --panel-muted: #59655f;
+  --panel-line: rgba(18, 36, 32, 0.12);
+  --panel-glow: #ffffff;
+  --t-person: #b0455a;
+  --t-org: #2b8178;
+  --t-product: #5563b8;
+  --t-place: #5c7d3f;
+  --t-topic: #8a5aa0;
   color-scheme: light;
 }
 

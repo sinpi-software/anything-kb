@@ -12,9 +12,9 @@ async function seedChain(): Promise<{ orgId: string; ids: string[] }> {
   const rows = await db
     .insert(transformations)
     .values([
-      { orgId: org.id, position: 0, type: "summarize", prompt: "a" },
-      { orgId: org.id, position: 1, type: "score", prompt: "b" },
-      { orgId: org.id, position: 2, type: "classify", prompt: "c" },
+      { orgId: org.id, position: 0, type: "summarize", name: "a", prompt: "a" },
+      { orgId: org.id, position: 1, type: "score", name: "b", prompt: "b" },
+      { orgId: org.id, position: 2, type: "classify", name: "c", prompt: "c" },
     ])
     .returning();
   return { orgId: org.id, ids: rows.map((r) => r.id) };

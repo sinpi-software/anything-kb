@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    Roboto, Helvetica, Arial, sans-serif;
+
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-ink: var(--panel-ink);
+  --color-panel-muted: var(--panel-muted);
+  --color-panel-line: var(--panel-line);
+  --color-beacon: var(--beacon);
+
+  --color-t-person: var(--t-person);
+  --color-t-org: var(--t-org);
+  --color-t-product: var(--t-product);
+  --color-t-place: var(--t-place);
+  --color-t-topic: var(--t-topic);
+}
+
+:root {
+  /* themed page chrome — light is the base */
+  --ground: #f2f4f3;
+  --surface: #ffffff;
+  --ink: #14201e;
+  --muted: #58655f;
+  --line: rgba(18, 36, 32, 0.12);
+  --line-strong: rgba(18, 36, 32, 0.2);
+  --accent: #a96e08; /* deep amber for text/links on light */
+  --accent-fill: #e8b341; /* the beacon — fills the CTA in both themes */
+  --accent-ink: #1a1305; /* text on the amber fill */
+
+  /* always-dark console (graph + code) — fixed across themes */
+  --panel: #0e1517;
+  --panel-2: #0b1113;
+  --panel-ink: #e9eeec;
+  --panel-muted: #8b9c97;
+  --panel-line: rgba(233, 238, 236, 0.11);
+  --beacon: #e8b341;
+
+  /* entity-type hues, muted jewel */
+  --t-person: #e39ba3;
+  --t-org: #77bdb4;
+  --t-product: #9aa7e0;
+  --t-place: #afc88f;
+  --t-topic: #cdaad9;
+
+  --maxw: 1140px;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0e1517;
+    --surface: #141f21;
+    --ink: #e9eeec;
+    --muted: #8b9c97;
+    --line: rgba(233, 238, 236, 0.12);
+    --line-strong: rgba(233, 238, 236, 0.2);
+    --accent: #e8b341;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0e1517;
+  --surface: #141f21;
+  --ink: #e9eeec;
+  --muted: #8b9c97;
+  --line: rgba(233, 238, 236, 0.12);
+  --line-strong: rgba(233, 238, 236, 0.2);
+  --accent: #e8b341;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --ground: #f2f4f3;
+  --surface: #ffffff;
+  --ink: #14201e;
+  --muted: #58655f;
+  --line: rgba(18, 36, 32, 0.12);
+  --line-strong: rgba(18, 36, 32, 0.2);
+  --accent: #a96e08;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  text-wrap: balance;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease;
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}

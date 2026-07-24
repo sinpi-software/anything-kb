@@ -33,6 +33,7 @@ def seed_database() -> None:
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
+    api_key_plaintext: str | None = None
 
     with get_postgres_session() as session:
         admin, admin_created = get_or_create(
@@ -64,14 +65,37 @@ def seed_database() -> None:
             org_id=org.id,
             user_id=admin.id,
         )
+
+        from auth import generate_api_key, hash_key
+        from models import ApiKey, OrgConfig
+
+        _cfg, config_created = get_or_create(
+            session,
+            OrgConfig,
+            defaults={
+                "relevance_prompt": "Is this content about technology, science, or business news?",
+                "entity_types": ["Person", "Organization", "Place", "Topic"],
+                "relationship_types": ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "FOUNDED"],
+            },
+            org_id=org.id,
+        )
+
+        existing_key = session.query(ApiKey).filter(ApiKey.org_id == org.id, ApiKey.revoked_at.is_(None)).first()
+        if existing_key is None:
+            api_key_plaintext = generate_api_key()
+            session.add(ApiKey(org_id=org.id, key_hash=hash_key(api_key_plaintext)))
+
         session.commit()
 
     for label, created in [
         (f"admin user {admin_email!r}", admin_created),
         ("default org", org_created),
         ("org membership", membership_created),
+        ("org config", config_created),
     ]:
         print(f"  {'created' if created else 'exists '}  {label}")
+    if api_key_plaintext is not None:
+        print(f"\n  API KEY (shown once): {api_key_plaintext}\n")
 
 
 if __name__ == "__main__":

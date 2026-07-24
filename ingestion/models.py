@@ -11,10 +11,11 @@ from sqlalchemy import (
 )
 
 # use postgres primitives
-from sqlalchemy.dialects.postgresql import BOOLEAN, TEXT, TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, BOOLEAN, JSONB, TEXT, TIMESTAMP, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
+    backref,
     declared_attr,
     mapped_column,
     relationship,
@@ -85,6 +86,46 @@ class Org(_AuthoredModel):
     __tablename__ = "orgs"
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     charter: Mapped[str] = mapped_column(TEXT, nullable=True)
+
+
+class JobStatus(Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    DONE = "done"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class OrgConfig(_BaseModel):
+    __tablename__ = "org_configs"
+    __table_args__ = (UniqueConstraint("org_id"),)
+    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+    org: Mapped["Org"] = relationship("Org", backref=backref("config", uselist=False))
+    relevance_prompt: Mapped[str] = mapped_column(TEXT, nullable=False)
+    entity_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
+    relationship_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
+
+
+class ApiKey(_BaseModel):
+    __tablename__ = "api_keys"
+    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+    org: Mapped["Org"] = relationship("Org", backref="api_keys")
+    key_hash: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
+    revoked_at: Mapped[DateTime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class IngestJob(_BaseModel):
+    __tablename__ = "ingest_jobs"
+    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+    org: Mapped["Org"] = relationship("Org", backref="ingest_jobs")
+    content: Mapped[str] = mapped_column(TEXT, nullable=False)
+    # `metadata` is reserved on Declarative classes, so the attribute is job_metadata.
+    job_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(TEXT, nullable=False, server_default=JobStatus.PENDING.value)
+    relevance_reason: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    error: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    attempts: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    processed_at: Mapped[DateTime | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
 class OrgSettings(_AuthoredModel):

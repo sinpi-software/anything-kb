@@ -10,7 +10,7 @@ dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env")
 dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.local")
 dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.sample")
 
-from graph_api import graphql_router  # noqa: E402
+from graph_api import cookie_graphql_router, graphql_router  # noqa: E402
 from neo4j_client import bootstrap_schema  # noqa: E402
 from routes_auth import router as auth_router  # noqa: E402
 from routes_config import router as config_router  # noqa: E402
@@ -57,6 +57,7 @@ app = FastAPI(
 app.include_router(content_router)
 app.include_router(config_router)
 app.include_router(graphql_router, prefix="/graphql")
+app.include_router(cookie_graphql_router, prefix="/api/graphql")
 app.include_router(auth_router)
 app.include_router(keys_router)
 app.include_router(ingest_router)

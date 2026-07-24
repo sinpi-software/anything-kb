@@ -10,4 +10,5 @@ export default [
   route("app", "routes/dashboard.tsx"),
   route("app/ingest", "routes/ingest.tsx"),
   route("app/config", "routes/config.tsx"),
+  route("app/explore", "routes/explore.tsx"),
 ] satisfies RouteConfig;

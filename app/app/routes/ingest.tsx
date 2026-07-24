@@ -25,8 +25,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { me };
 }
 
-const POLL_MS = 1500;
-const MAX_POLLS = 60; // ~90s ceiling before we stop polling and tell the user to check back
+const POLL_START_MS = 1500;
+const POLL_MAX_MS = 4000; // gentle backoff so long jobs don't hammer the API
+const POLL_CEILING_MS = 4 * 60 * 1000; // auto-poll for ~4 min, then let the user keep waiting
 
 type Phase =
   | { kind: "idle" }
@@ -34,6 +35,7 @@ type Phase =
   | { kind: "done" }
   | { kind: "skipped"; reason: string | null }
   | { kind: "failed"; error: string | null }
+  | { kind: "timeout"; jobId: string }
   | { kind: "error"; message: string };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,6 +77,17 @@ function StatusCard({ phase }: { phase: Phase }) {
       </div>
     );
   }
+  if (phase.kind === "timeout") {
+    return (
+      <div role="status" className={cn(CARD_BASE, NEUTRAL)}>
+        <MinusCircle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+        <span>
+          <span className="font-semibold">Still processing.</span> Longer text can take a few minutes.
+          It'll land in your graph when done — keep waiting or check Explore later.
+        </span>
+      </div>
+    );
+  }
   const message =
     phase.kind === "failed" ? (phase.error ?? "Something went wrong during processing.") : phase.message;
   return (
@@ -107,22 +120,37 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
   const working = phase.kind === "working";
   const canSubmit = me.email_verified && text.trim().length > 0 && !working;
 
+  // Poll a job with gentle backoff until it resolves or the auto-poll ceiling is hit.
+  async function pollJob(jobId: string) {
+    setPhase({ kind: "working", label: "Analyzing…" });
+    const started = Date.now();
+    let wait = POLL_START_MS;
+    while (Date.now() - started < POLL_CEILING_MS) {
+      await delay(wait);
+      if (!mounted.current) return;
+      let job;
+      try {
+        job = await getJob(jobId);
+      } catch (err) {
+        setPhase({ kind: "error", message: err instanceof ApiError ? err.message : "Lost track of that job." });
+        return;
+      }
+      if (job.status === "done") return setPhase({ kind: "done" });
+      if (job.status === "skipped") return setPhase({ kind: "skipped", reason: job.relevance_reason });
+      if (job.status === "failed") return setPhase({ kind: "failed", error: job.error });
+      setPhase({ kind: "working", label: job.status === "processing" ? "Analyzing…" : "Queued — waiting…" });
+      wait = Math.min(POLL_MAX_MS, Math.round(wait * 1.25));
+    }
+    setPhase({ kind: "timeout", jobId });
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) return;
     setPhase({ kind: "working", label: "Queuing…" });
     try {
       const { job_id } = await ingestContent(text, source.trim() || undefined);
-      for (let i = 0; i < MAX_POLLS; i++) {
-        await delay(POLL_MS);
-        if (!mounted.current) return;
-        const job = await getJob(job_id);
-        if (job.status === "done") return setPhase({ kind: "done" });
-        if (job.status === "skipped") return setPhase({ kind: "skipped", reason: job.relevance_reason });
-        if (job.status === "failed") return setPhase({ kind: "failed", error: job.error });
-        setPhase({ kind: "working", label: job.status === "processing" ? "Analyzing…" : "Queued — waiting…" });
-      }
-      setPhase({ kind: "error", message: "Still processing — check your graph again shortly." });
+      await pollJob(job_id);
     } catch (err) {
       setPhase({ kind: "error", message: err instanceof ApiError ? err.message : "Couldn't ingest that." });
     }
@@ -134,7 +162,8 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
     setPhase({ kind: "idle" });
   }
 
-  const finished = phase.kind === "done" || phase.kind === "skipped" || phase.kind === "failed";
+  const finished =
+    phase.kind === "done" || phase.kind === "skipped" || phase.kind === "failed" || phase.kind === "timeout";
 
   async function handleLogout() {
     await logout();
@@ -199,11 +228,21 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
 
               <StatusCard phase={phase} />
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" disabled={!canSubmit} className="flex-none">
                   <Send className="size-4" aria-hidden="true" />
                   {working ? "Ingesting…" : "Ingest"}
                 </Button>
+                {phase.kind === "timeout" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => pollJob(phase.jobId)}
+                    className="flex-none text-sm"
+                  >
+                    Keep waiting
+                  </Button>
+                ) : null}
                 {finished ? (
                   <Button type="button" variant="outline" onClick={handleReset} className="flex-none text-sm">
                     Ingest another

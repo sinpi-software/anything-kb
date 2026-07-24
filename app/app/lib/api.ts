@@ -1,7 +1,7 @@
 // Client-side auth + API-key mutations. Same-origin `fetch` so the browser
 // carries the `session` cookie and sends `Origin` automatically — the
 // backend relies on both for CSRF protection.
-import type { ApiKey, CreatedApiKey, Me } from "./types";
+import type { ApiKey, CreatedApiKey, KbConfig, Me } from "./types";
 
 const API_BASE = "/api";
 
@@ -98,3 +98,6 @@ export const ingestContent = (text: string, source?: string): Promise<JobAccepte
   });
 
 export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>(`/content/${jobId}`);
+
+export const updateConfig = (config: KbConfig): Promise<KbConfig> =>
+  apiFetch<KbConfig>("/config", { method: "PUT", body: JSON.stringify(config) });

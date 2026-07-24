@@ -1,6 +1,6 @@
-import { KeyRound, LogOut, Trash2, Upload } from "lucide-react";
+import { KeyRound, LogOut, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Link, redirect, useNavigate, useRevalidator } from "react-router";
+import { redirect, useNavigate, useRevalidator } from "react-router";
 
 import { CopyButton } from "~/components/copy-button";
 import { SiteHeader } from "~/components/site-header";
@@ -11,6 +11,7 @@ import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { ApiError, createKey, logout, revokeKey } from "~/lib/api";
+import { APP_NAV_LINKS } from "~/lib/nav";
 import { getKeys, getMe } from "~/lib/auth.server";
 import type { ApiKey, CreatedApiKey } from "~/lib/types";
 import { cn } from "~/lib/utils";
@@ -167,20 +168,15 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
+        navLinks={APP_NAV_LINKS}
         actions={
-          <>
-            <Button variant="outline" render={<Link to="/app/ingest" />} className="text-sm">
-              <Upload className="size-3.5" aria-hidden="true" />
-              Ingest content
-            </Button>
-            <Button variant="outline" onClick={handleLogout} className="text-sm">
-              <LogOut className="size-3.5" aria-hidden="true" />
-              Log out
-            </Button>
-          </>
+          <Button variant="outline" onClick={handleLogout} className="text-sm">
+            <LogOut className="size-3.5" aria-hidden="true" />
+            Log out
+          </Button>
         }
       />
-      <main className="mx-auto max-w-(--maxw) px-7 py-12">
+      <main className="mx-auto max-w-(--maxw) px-5 py-8 sm:px-7 sm:py-12">
         <p className="font-display text-xs font-semibold tracking-[0.2em] text-accent uppercase">
           Dashboard
         </p>

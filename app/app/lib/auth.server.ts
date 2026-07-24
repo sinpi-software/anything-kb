@@ -3,7 +3,9 @@
 // Cookie header to the in-cluster backend by hand. Never forwards
 // Set-Cookie back — mutations are client-side (see lib/api.ts) and set the
 // cookie directly from the same-origin browser response.
-import type { ApiKey, Me } from "./types";
+import type { ApiKey, KbConfig, Me } from "./types";
+
+const EMPTY_CONFIG: KbConfig = { relevance_prompt: "", entity_types: [], relationship_types: [] };
 
 const INTERNAL_API_URL =
   process.env.INTERNAL_API_URL ?? "http://ingestion-api.ingestion.svc.cluster.local:80";
@@ -35,5 +37,17 @@ export async function getKeys(request: Request): Promise<ApiKey[]> {
     return await res.json();
   } catch {
     return [];
+  }
+}
+
+export async function getConfig(request: Request): Promise<KbConfig> {
+  try {
+    const res = await fetch(`${INTERNAL_API_URL}/api/config`, {
+      headers: forwardCookie(request),
+    });
+    if (!res.ok) return EMPTY_CONFIG;
+    return await res.json();
+  } catch {
+    return EMPTY_CONFIG;
   }
 }

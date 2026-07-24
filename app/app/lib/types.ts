@@ -4,6 +4,12 @@ export interface KnowledgeBaseMembership {
   role: string;
 }
 
+export interface KbConfig {
+  relevance_prompt: string;
+  entity_types: string[];
+  relationship_types: string[];
+}
+
 export interface Me {
   id: string;
   email: string;

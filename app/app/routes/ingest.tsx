@@ -1,6 +1,6 @@
-import { ArrowLeft, CheckCircle2, Loader2, MinusCircle, Send, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, MinusCircle, Send, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, redirect, useNavigate } from "react-router";
+import { redirect, useNavigate } from "react-router";
 
 import { SiteHeader } from "~/components/site-header";
 import { VerifyEmailBanner } from "~/components/verify-email-banner";
@@ -11,6 +11,7 @@ import { Input } from "~/components/ui/input";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError, getJob, ingestContent, logout } from "~/lib/api";
 import { getMe } from "~/lib/auth.server";
+import { APP_NAV_LINKS } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/ingest";
 
@@ -143,19 +144,14 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
+        navLinks={APP_NAV_LINKS}
         actions={
-          <>
-            <Button variant="outline" render={<Link to="/app" />} className="text-sm">
-              <ArrowLeft className="size-3.5" aria-hidden="true" />
-              Dashboard
-            </Button>
-            <Button variant="outline" onClick={handleLogout} className="text-sm">
-              Log out
-            </Button>
-          </>
+          <Button variant="outline" onClick={handleLogout} className="text-sm">
+            Log out
+          </Button>
         }
       />
-      <main className="mx-auto max-w-(--maxw) px-7 py-12">
+      <main className="mx-auto max-w-(--maxw) px-5 py-8 sm:px-7 sm:py-12">
         <p className="font-display text-xs font-semibold tracking-[0.2em] text-accent uppercase">
           Ingest content
         </p>

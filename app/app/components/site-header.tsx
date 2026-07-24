@@ -10,7 +10,7 @@ export interface SiteHeaderProps {
 
 export function SiteHeader({ navLinks = [], actions }: SiteHeaderProps) {
   return (
-    <header className="mx-auto flex max-w-(--maxw) items-center justify-between border-b border-line px-7 py-5">
+    <header className="mx-auto flex max-w-(--maxw) flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line px-5 py-4 sm:px-7 sm:py-5">
       <Link
         to="/"
         className="flex items-center gap-2.5 font-display text-sm font-semibold tracking-tight text-ink"
@@ -21,13 +21,9 @@ export function SiteHeader({ navLinks = [], actions }: SiteHeaderProps) {
         />
         anything<span className="text-muted">/kb</span>
       </Link>
-      <nav className="flex items-center gap-6 font-display text-sm">
+      <nav className="flex flex-wrap items-center gap-4 font-display text-sm sm:gap-6">
         {navLinks.map((link) => (
-          <a
-            key={link.href}
-            href={link.href}
-            className="hidden text-muted hover:text-ink sm:inline"
-          >
+          <a key={link.href} href={link.href} className="text-muted hover:text-ink">
             {link.label}
           </a>
         ))}

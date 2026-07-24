@@ -92,11 +92,20 @@ def seed_database() -> None:
         # Ordered transform chain for the org — each step's output feeds the next (by position).
         transform_model = "openai/gpt-5-nano"
         transform_chain = [
-            (0, TransformationType.SUMMARIZE.value, "Summarize this article in 3 concise sentences.", None),
+            (
+                0,
+                TransformationType.SUMMARIZE.value,
+                "Summarize this article in 3 concise sentences.",
+                None,
+                "summary",
+                None,
+            ),
             (
                 1,
                 TransformationType.SCORE.value,
                 "Given this summary, is the story newsworthy? Score 0-10 with a short rationale.",
+                None,
+                "newsworthiness",
                 None,
             ),
             (
@@ -104,18 +113,32 @@ def seed_database() -> None:
                 TransformationType.KNOWLEDGE.value,
                 "Extract the notable entities and how they relate from this article.",
                 {"entity_types": ["Person", "Place", "Organization", "Topic", "Story"]},
+                "knowledge",
+                {"source": "newsworthiness", "field": "score", "op": "gte", "value": 5},
             ),
         ]
         transforms_created = []
-        for position, transform_type, prompt, params in transform_chain:
-            validate_transform_config(transform_type, transform_model, prompt, params)
-            _transform, created = get_or_create(
+        for position, transform_type, prompt, params, name, gate in transform_chain:
+            validate_transform_config(transform_type, transform_model, prompt, params, name=name, gate=gate)
+            transform, created = get_or_create(
                 session,
                 Transformation,
-                defaults=dict(type=transform_type, model=transform_model, prompt=prompt, params=params, **audit),
+                defaults=dict(
+                    type=transform_type,
+                    model=transform_model,
+                    prompt=prompt,
+                    params=params,
+                    name=name,
+                    gate=gate,
+                    **audit,
+                ),
                 org_id=org.id,
                 position=position,
             )
+            # Update name and gate even if transform already existed
+            if not created:
+                transform.name = name
+                transform.gate = gate
             transforms_created.append((f"transform[{position}] {transform_type}", created))
 
         session.commit()

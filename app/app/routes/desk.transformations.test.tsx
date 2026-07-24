@@ -49,4 +49,23 @@ describe("TransformationsPage", () => {
     // Two selects were already present (Type for each row); enabling the gate adds the op select.
     expect(await screen.findAllByRole("combobox")).toHaveLength(3);
   });
+
+  it("defaults a score step's gate field to its output field, as a dropdown (no typing)", async () => {
+    renderPage();
+    const expandButtons = await screen.findAllByRole("button", { name: "Expand row" });
+    await userEvent.click(expandButtons[1]); // the score row
+    await screen.findByDisplayValue("Score it");
+
+    const gateToggle = screen.getByRole("checkbox", {
+      name: "Halt the chain unless this step's output meets a condition",
+    });
+    await userEvent.click(gateToggle);
+
+    // score's only output field is "score" — pre-selected as a dropdown, not a free-text box.
+    expect(screen.queryByPlaceholderText("field")).not.toBeInTheDocument();
+    // "score" now shows twice as select text: the row's Type trigger and the gate's field trigger.
+    expect(screen.getAllByText("score")).toHaveLength(2);
+    // Two type selects + the gate's field select + op select.
+    expect(await screen.findAllByRole("combobox")).toHaveLength(4);
+  });
 });

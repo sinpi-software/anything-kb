@@ -24,6 +24,7 @@ import type { Route } from "./+types/desk.transformations";
 import { listTransformations, type TransformationRow } from "~/services/transformations.server";
 import {
   TRANSFORMATION_TYPES,
+  TRANSFORMATION_OUTPUT_FIELDS,
   GATE_OPS,
   parseParams,
   transformationInputSchema,
@@ -336,7 +337,11 @@ function EditableRow({ row }: { row: TransformationRow }) {
               <div className="flex flex-col gap-1 md:col-span-2">
                 <span className="text-xs text-muted-foreground">Gate</span>
                 <form.Field name="gate" listeners={debounced}>
-                  {(field) => <GateFields value={field.state.value} onChange={field.handleChange} />}
+                  {(field) => (
+                    <form.Subscribe selector={(s) => s.values.type}>
+                      {(type) => <GateFields value={field.state.value} onChange={field.handleChange} type={type} />}
+                    </form.Subscribe>
+                  )}
                 </form.Field>
               </div>
             </div>
@@ -351,23 +356,36 @@ function EditableRow({ row }: { row: TransformationRow }) {
 function GateFields({
   value,
   onChange,
+  type,
 }: {
   value: GateDraft | null;
   onChange: (next: GateDraft | null) => void;
+  type: Draft["type"];
 }) {
+  // The gate checks this step's own output, so the field comes from the type's output shape.
+  const fields = TRANSFORMATION_OUTPUT_FIELDS[type];
   return (
     <div className="flex flex-col gap-2">
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           type="checkbox"
           checked={value !== null}
-          onChange={(e) => onChange(e.target.checked ? { field: "", op: GATE_OPS[0], value: "" } : null)}
+          onChange={(e) => onChange(e.target.checked ? { field: fields[0] ?? "", op: GATE_OPS[0], value: "" } : null)}
         />
         Halt the chain unless this step's output meets a condition
       </label>
       {value && (
         <div className="grid grid-cols-3 gap-2">
-          <Input value={value.field} onChange={(e) => onChange({ ...value, field: e.target.value })} placeholder="field" />
+          {fields.length ? (
+            <Select value={value.field} onValueChange={(field) => field && onChange({ ...value, field })}>
+              <SelectTrigger><SelectValue placeholder="field" /></SelectTrigger>
+              <SelectContent>
+                {fields.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input value={value.field} onChange={(e) => onChange({ ...value, field: e.target.value })} placeholder="field" />
+          )}
           <Select value={value.op} onValueChange={(op) => op && onChange({ ...value, op })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>

@@ -3,6 +3,16 @@ import { z } from "zod";
 export const TRANSFORMATION_TYPES = ["score", "summarize", "classify", "knowledge"] as const;
 export type TransformationType = (typeof TRANSFORMATION_TYPES)[number];
 
+// The top-level fields each transform type emits in its output JSON — the values a
+// gate can check. Mirrors the ingestion output schemas (LLM*TransformOutput,
+// KnowledgeTransformOutput). `summarize` emits markdown, so it has no gateable field.
+export const TRANSFORMATION_OUTPUT_FIELDS: Record<TransformationType, readonly string[]> = {
+  score: ["score"],
+  classify: ["categories"],
+  knowledge: ["entities_created", "entities_merged", "relationships_created"],
+  summarize: [],
+};
+
 export const llmParamsSchema = z
   .object({
     temperature: z.number().min(0).max(2).optional(),

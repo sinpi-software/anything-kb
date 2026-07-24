@@ -1,17 +1,15 @@
-import os
 import re
-import uuid
+import threading
 from typing import Any
 
 from neo4j import Session
 from openrouter import OpenRouter
-from prefect.concurrency.sync import concurrency
 from pydantic import BaseModel
 
 import config
-from db import get_postgres_session
-from models import Artifact, Transformation
-from neo4j_client import get_neo4j_session
+
+# Bounds concurrent OpenRouter calls in place of the old Prefect concurrency pool.
+_llm_semaphore = threading.Semaphore(config.LLM_CONCURRENCY)
 
 
 class ExtractedEntity(BaseModel):
@@ -30,16 +28,6 @@ class ExtractedRelationship(BaseModel):
 class KnowledgeExtraction(BaseModel):
     entities: list[ExtractedEntity] = []
     relationships: list[ExtractedRelationship] = []
-
-
-class KnowledgeTransformOutput(BaseModel):
-    entities_created: int
-    entities_merged: int
-    relationships_created: int
-    source_artifact_id: str
-
-    def to_model(self) -> tuple[str, str]:
-        return self.model_dump_json(), "application/json"
 
 
 def normalize_name(name: str) -> str:
@@ -65,7 +53,7 @@ def _chat(
     kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout_ms": config.LLM_TIMEOUT_MS, **llm_params}
     if response_format is not None:
         kwargs["response_format"] = response_format
-    with concurrency(config.LLM_CONCURRENCY_NAME, occupy=1):
+    with _llm_semaphore:
         result = client.chat.send(**kwargs)
     content = result.choices[0].message.content
     return content if isinstance(content, str) else None
@@ -270,62 +258,3 @@ def write_provenance(session: Session, org_id: str, entity_id: str, artifact_id:
         "WITH s MATCH (e:Entity {id: $entity_id, org_id: $org_id}) MERGE (e)-[:MENTIONED_IN]->(s)",
         {"org_id": org_id, "artifact_id": artifact_id, "entity_id": entity_id},
     )
-
-
-def run_knowledge_transform(artifact_id: str, transformation_id: str) -> str:
-    artifact_id = str(artifact_id)  # pipeline may pass a uuid.UUID; Neo4j needs str params
-    with get_postgres_session() as session:
-        transformation = session.get(Transformation, transformation_id)
-        if transformation is None:
-            raise ValueError(f"Transformation {transformation_id} not found")
-        artifact = session.get(Artifact, artifact_id)
-        if artifact is None or artifact.org_id is None:
-            raise ValueError(f"Artifact {artifact_id} missing or has no org")
-        model, prompt, text = transformation.model, transformation.prompt, artifact.data
-        params = dict(transformation.params or {})
-        entity_types = params.pop("entity_types", [])  # the rest are LLM knobs
-        org_id = str(artifact.org_id)
-
-    allowed = {t.lower() for t in entity_types}
-    created = merged = rels = 0
-    name_to_id: dict[str, str] = {}
-    with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
-        extraction = extract_knowledge(client, model, prompt, entity_types, text, params)
-        entities = [e for e in extraction.entities if e.type.lower() in allowed]
-        resolved_ids = resolve_entities_batch(neo, client, model, org_id, entities, params)
-        for entity, existing_id in zip(entities, resolved_ids, strict=True):
-            if existing_id is None:
-                entity_id, summary = str(uuid.uuid4()), entity.description
-                created += 1
-            else:
-                entity_id = existing_id
-                row = neo.run(
-                    "MATCH (e:Entity {id: $id, org_id: $org_id}) RETURN e.summary AS s",
-                    {"id": entity_id, "org_id": org_id},
-                ).single()
-                summary = merge_summary(client, model, row["s"] if row else "", entity.description, params)
-                merged += 1
-            upsert_entity(neo, org_id, entity_id, entity, summary)
-            write_provenance(neo, org_id, entity_id, artifact_id)
-            name_to_id[normalize_name(entity.name)] = entity_id
-
-        for rel in extraction.relationships:
-            src = name_to_id.get(normalize_name(rel.source_name))
-            tgt = name_to_id.get(normalize_name(rel.target_name))
-            if src and tgt:
-                write_relationship(neo, org_id, src, tgt, rel.type, artifact_id)
-                rels += 1
-
-    output = KnowledgeTransformOutput(
-        entities_created=created, entities_merged=merged, relationships_created=rels, source_artifact_id=artifact_id
-    )
-    data, content_type = output.to_model()
-    with get_postgres_session() as session:
-        out = Artifact(
-            org_id=org_id, ref_table_name=Artifact.__tablename__, ref_table_id=artifact_id, type=content_type, data=data
-        )
-        session.add(out)
-        session.flush()
-        out_id = out.id
-        session.commit()
-    return out_id

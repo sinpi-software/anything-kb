@@ -4,7 +4,6 @@ from typing import Any
 from sqlalchemy import (
     DateTime,
     ForeignKey,
-    Index,
     UniqueConstraint,
     func,
     inspect,
@@ -12,7 +11,7 @@ from sqlalchemy import (
 )
 
 # use postgres primitives
-from sqlalchemy.dialects.postgresql import BOOLEAN, JSONB, TEXT, TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import BOOLEAN, TEXT, TIMESTAMP, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -33,26 +32,6 @@ class OrgUserRole(Enum):
     ADMIN = "admin"
     EDITOR = "editor"
     READER = "reader"
-
-
-class TransformationType(Enum):
-    SCORE = "score"
-    SUMMARIZE = "summarize"
-    CLASSIFY = "classify"
-    KNOWLEDGE = "knowledge"
-
-
-class TransformRunStatus(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class RssFeedItemStatus(Enum):
-    PENDING = "pending"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class _BaseModel(Base):
@@ -124,71 +103,6 @@ class OrgUser(_AuthoredModel):
     org: Mapped["Org"] = relationship("Org", backref="users")
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id], backref="orgs")
     role: Mapped[str] = mapped_column(TEXT, nullable=False)  # e.g., 'admin', 'member', etc.
-
-
-class RssFeed(_AuthoredModel):
-    __tablename__ = "rss_feeds"
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped[Org] = relationship("Org", backref="rss_feeds")
-    url: Mapped[str] = mapped_column(TEXT, nullable=False)
-    title: Mapped[str] = mapped_column(TEXT, nullable=True)
-    last_fetched_at: Mapped[DateTime] = mapped_column(TIMESTAMP, nullable=True)
-    active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, server_default=false())
-
-
-class Artifact(_BaseModel):
-    __tablename__ = "artifacts"
-    __table_args__ = (Index("ix_artifacts_type", "type"),)
-    org_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=True)
-    ref_table_name: Mapped[str] = mapped_column(nullable=False)
-    ref_table_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
-    type: Mapped[str] = mapped_column(TEXT, nullable=False)
-    data: Mapped[str] = mapped_column(TEXT, nullable=False)
-
-
-class Transformation(_AuthoredModel):
-    __tablename__ = "transformations"
-    # Deferred so reordering can rewrite positions within a txn without tripping the
-    # unique check mid-update; Postgres validates once at COMMIT.
-    __table_args__ = (
-        UniqueConstraint("org_id", "position", deferrable=True, initially="DEFERRED"),
-        UniqueConstraint("org_id", "name"),
-    )
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="transformations")
-    position: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
-    type: Mapped[str] = mapped_column(TEXT, nullable=False)
-    model: Mapped[str] = mapped_column(TEXT, nullable=True)
-    prompt: Mapped[str] = mapped_column(TEXT, nullable=False)
-    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=True)
-    name: Mapped[str] = mapped_column(TEXT, nullable=False)
-    gate: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-
-
-class TransformRun(_BaseModel):
-    __tablename__ = "transform_runs"
-    transformation_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("transformations.id"), nullable=False)
-    transformation: Mapped["Transformation"] = relationship("Transformation", backref="runs")
-    input_artifact_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=False)
-    output_artifact_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=True
-    )
-    status: Mapped[str] = mapped_column(TEXT, nullable=False, server_default=TransformRunStatus.PENDING.value)
-    error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
-
-
-class RssFeedItem(_BaseModel):
-    __tablename__ = "rss_feed_items"
-    __table_args__ = (UniqueConstraint("feed_id", "dedup_key"),)
-    feed_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("rss_feeds.id"), nullable=False)
-    feed: Mapped["RssFeed"] = relationship("RssFeed", backref="items")
-    dedup_key: Mapped[str] = mapped_column(TEXT, nullable=False)
-    title: Mapped[str] = mapped_column(TEXT, nullable=False)
-    link: Mapped[str] = mapped_column(TEXT, nullable=False)
-    content: Mapped[str] = mapped_column(TEXT, nullable=True)
-    status: Mapped[str] = mapped_column(TEXT, nullable=False, server_default=RssFeedItemStatus.PENDING.value)
-    # artifact_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=True)
-    # artifact: Mapped[Artifact] = relationship("Artifact", backref="rss_feed_items", cascade="all, delete-orphan")
 
 
 class AppSettings(_AuthoredModel):

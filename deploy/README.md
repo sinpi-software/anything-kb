@@ -76,9 +76,17 @@ Copy the printed key — it authenticates `POST /content`, `PUT /config`, `/grap
 
 - **Without a tunnel:** `kubectl -n ingestion port-forward svc/ingestion-api 8080:80`
   then hit `http://localhost:8080`.
-- **With the Cloudflare Tunnel:** in the Cloudflare dashboard create a tunnel, add a
-  public-hostname route to `http://ingestion-api.ingestion.svc.cluster.local:80`,
-  then `pulumi config set --secret tunnelToken <token>` and `pulumi up`.
+- **With the Cloudflare Tunnel:** set the connector token and, since this tunnel
+  routes its hostname to Traefik (hub pattern), point an Ingress at the API:
+  ```bash
+  pulumi config set --secret tunnelToken "eyJ..."       # connector token, not a tunnel ID
+  pulumi config set apiHostname desk.sinpi.software      # the tunnel's public hostname
+  pulumi up
+  ```
+  Live at `https://desk.sinpi.software` (Cloudflare → tunnel → Traefik → Ingress → API).
+  If instead your tunnel routes a hostname *directly* to a service, point its
+  dashboard route at `http://ingestion-api.ingestion.svc.cluster.local:80` and skip
+  `apiHostname`.
 
 ## Notes
 

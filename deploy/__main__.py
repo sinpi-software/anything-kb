@@ -207,6 +207,33 @@ api_svc = k8s.core.v1.Service(
     opts=pulumi.ResourceOptions(depends_on=[api_deploy]),
 )
 
+# Optional Traefik Ingress. The Cloudflare Tunnel forwards a hostname to Traefik
+# (hub pattern), so this exposes the API at that hostname: tunnel → traefik → here.
+api_hostname = cfg.get("apiHostname")
+if api_hostname:
+    k8s.networking.v1.Ingress(
+        "ingestion-api",
+        metadata=meta("ingestion-api"),
+        spec={
+            "ingressClassName": "traefik",
+            "rules": [
+                {
+                    "host": api_hostname,
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/",
+                                "pathType": "Prefix",
+                                "backend": {"service": {"name": "ingestion-api", "port": {"number": 80}}},
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        opts=pulumi.ResourceOptions(depends_on=[api_svc]),
+    )
+
 
 # --- cloudflare tunnel (optional) -----------------------------------------
 # Route your public hostname to http://ingestion-api.ingestion.svc.cluster.local:80

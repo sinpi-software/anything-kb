@@ -88,10 +88,16 @@ def test_extraction_defaults_aliases_empty() -> None:
 
 
 def test_build_extraction_messages_includes_entity_and_relationship_types() -> None:
-    msgs = build_extraction_messages(["Person", "Place"], ["KNOWS", "BORN_IN"], "Some article")
+    msgs = build_extraction_messages(
+        [{"name": "Person", "description": "a named human"}, {"name": "Place", "description": ""}],
+        [{"name": "KNOWS", "description": ""}, {"name": "BORN_IN", "description": "birthplace of a person"}],
+        "Some article",
+    )
     joined = " ".join(m["content"] for m in msgs)
     assert "Person" in joined and "Place" in joined
     assert "KNOWS" in joined and "BORN_IN" in joined
+    # type descriptions are rendered into the prompt
+    assert "a named human" in joined and "birthplace of a person" in joined
     assert "Some article" in joined
     assert msgs[0]["role"] == "system"
     assert msgs[-1]["role"] == "user"
@@ -353,7 +359,11 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
     job_id = str(uuid.uuid4())
     try:
         result = merge_content(
-            knowledge_base_id, "Ada worked on the Engine.", ["Person", "Thing"], ["WORKED_ON"], job_id
+            knowledge_base_id,
+            "Ada worked on the Engine.",
+            [{"name": "Person", "description": ""}, {"name": "Thing", "description": ""}],
+            [{"name": "WORKED_ON", "description": ""}],
+            job_id,
         )
         assert isinstance(result, MergeResult)
         assert result.entities_created == 2  # Rover filtered

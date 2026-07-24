@@ -57,20 +57,27 @@ def test_put_config_creates_then_updates(client_and_knowledge_base) -> None:  # 
     client, knowledge_base_id, key = client_and_knowledge_base
     headers = {"Authorization": f"Bearer {key}"}
 
-    body1 = {"relevance_prompt": "p1", "entity_types": ["Person"], "relationship_types": ["KNOWS"]}
+    body1 = {
+        "relevance_prompt": "p1",
+        "entity_types": [{"name": "Person", "description": "a human"}],
+        "relationship_types": [{"name": "KNOWS", "description": ""}],
+    }
     r1 = client.put("/config", json=body1, headers=headers)
     assert r1.status_code == 200
-    assert r1.json()["entity_types"] == ["Person"]
+    assert r1.json()["entity_types"] == [{"name": "Person", "description": "a human"}]
 
     body2 = {
         "relevance_prompt": "p2",
-        "entity_types": ["Person", "Organization"],
-        "relationship_types": ["KNOWS", "WORKS_AT"],
+        "entity_types": [{"name": "Person", "description": ""}, {"name": "Organization", "description": ""}],
+        "relationship_types": [{"name": "KNOWS", "description": ""}, {"name": "WORKS_AT", "description": ""}],
     }
     r2 = client.put("/config", json=body2, headers=headers)
     assert r2.status_code == 200
     assert r2.json()["relevance_prompt"] == "p2"
-    assert r2.json()["relationship_types"] == ["KNOWS", "WORKS_AT"]
+    assert r2.json()["relationship_types"] == [
+        {"name": "KNOWS", "description": ""},
+        {"name": "WORKS_AT", "description": ""},
+    ]
 
     from db import get_postgres_session
     from models import KnowledgeBaseConfig

@@ -4,10 +4,15 @@ export interface KnowledgeBaseMembership {
   role: string;
 }
 
+export interface TypeDef {
+  name: string;
+  description: string;
+}
+
 export interface KbConfig {
   relevance_prompt: string;
-  entity_types: string[];
-  relationship_types: string[];
+  entity_types: TypeDef[];
+  relationship_types: TypeDef[];
 }
 
 export interface Me {

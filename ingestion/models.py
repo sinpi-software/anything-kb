@@ -11,7 +11,7 @@ from sqlalchemy import (
 )
 
 # use postgres primitives
-from sqlalchemy.dialects.postgresql import ARRAY, BOOLEAN, JSONB, TEXT, TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import BOOLEAN, JSONB, TEXT, TIMESTAMP, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -102,8 +102,13 @@ class KnowledgeBaseConfig(_BaseModel):
     knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
     knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref=backref("config", uselist=False))
     relevance_prompt: Mapped[str] = mapped_column(TEXT, nullable=False)
-    entity_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
-    relationship_types: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False, server_default=text("'{}'"))
+    # Each type is {"name": str, "description": str}; the description guides the extractor.
+    entity_types: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    relationship_types: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
 
 class ApiKey(_BaseModel):

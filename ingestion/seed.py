@@ -74,8 +74,18 @@ def seed_database() -> None:
             KnowledgeBaseConfig,
             defaults={
                 "relevance_prompt": "Is this content about technology, science, or business news?",
-                "entity_types": ["Person", "Organization", "Place", "Topic"],
-                "relationship_types": ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "FOUNDED"],
+                "entity_types": [
+                    {"name": "Person", "description": "A specific, named individual human."},
+                    {"name": "Organization", "description": "A company, agency, institution, or group."},
+                    {"name": "Place", "description": "A geographic location — city, country, region, or venue."},
+                    {"name": "Topic", "description": "A subject, field, technology, or theme."},
+                ],
+                "relationship_types": [
+                    {"name": "WORKS_AT", "description": "A person is employed by or leads an organization."},
+                    {"name": "LOCATED_IN", "description": "An entity is situated in a place."},
+                    {"name": "RELATED_TO", "description": "A general association between two entities."},
+                    {"name": "FOUNDED", "description": "A person or organization established an organization."},
+                ],
             },
             knowledge_base_id=knowledge_base.id,
         )

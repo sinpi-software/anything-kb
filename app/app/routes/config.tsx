@@ -4,9 +4,9 @@ import { redirect, useNavigate } from "react-router";
 
 import { SiteHeader } from "~/components/site-header";
 import { VerifyEmailBanner } from "~/components/verify-email-banner";
+import { TypeListEditor } from "~/components/type-list-editor";
 import { Button } from "~/components/ui/button";
 import { Card, CardDescription, CardTitle } from "~/components/ui/card";
-import { ChipInput } from "~/components/ui/chip-input";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError, logout, updateConfig } from "~/lib/api";
@@ -107,26 +107,28 @@ export default function Config({ loaderData }: Route.ComponentProps) {
           <Card>
             <CardTitle className="text-lg">Schema</CardTitle>
             <CardDescription>
-              The entity and relationship types the extractor is allowed to create. Type a value and
-              press Enter.
+              The entity and relationship types the extractor may create. Give each a description —
+              it's fed to the model so it knows what the type means in your domain.
             </CardDescription>
-            <div className="mt-5 flex flex-col gap-5">
+            <div className="mt-5 flex flex-col gap-6">
               <Field>
                 <FieldLabel>Entity types</FieldLabel>
-                <ChipInput
+                <TypeListEditor
                   values={entities}
                   onChange={setEntities}
                   disabled={disabled}
-                  placeholder="e.g. Person, Organization, Place…"
+                  namePlaceholder="Person"
+                  descriptionPlaceholder="A specific, named individual…"
                 />
               </Field>
               <Field>
                 <FieldLabel>Relationship types</FieldLabel>
-                <ChipInput
+                <TypeListEditor
                   values={relationships}
                   onChange={setRelationships}
                   disabled={disabled}
-                  placeholder="e.g. WORKS_AT, FOUNDED, LOCATED_IN…"
+                  namePlaceholder="WORKS_AT"
+                  descriptionPlaceholder="A person is employed by an organization…"
                 />
               </Field>
             </div>

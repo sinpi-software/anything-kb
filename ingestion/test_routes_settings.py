@@ -101,16 +101,22 @@ def test_put_then_get_roundtrips_config(client: TestClient) -> None:
             "/api/config",
             json={
                 "relevance_prompt": "Is this about AI?",
-                "entity_types": ["Person", "Organization"],
-                "relationship_types": ["WORKS_AT"],
+                "entity_types": [
+                    {"name": "Person", "description": "a named human"},
+                    {"name": "Organization", "description": "a company"},
+                ],
+                "relationship_types": [{"name": "WORKS_AT", "description": ""}],
             },
             headers=LOCALHOST_ORIGIN,
         )
         assert put.status_code == 200
         got = client.get("/api/config").json()
         assert got["relevance_prompt"] == "Is this about AI?"
-        assert got["entity_types"] == ["Person", "Organization"]
-        assert got["relationship_types"] == ["WORKS_AT"]
+        assert got["entity_types"] == [
+            {"name": "Person", "description": "a named human"},
+            {"name": "Organization", "description": "a company"},
+        ]
+        assert got["relationship_types"] == [{"name": "WORKS_AT", "description": ""}]
     finally:
         _purge_user(email)
 
@@ -124,7 +130,12 @@ def test_put_config_sanitizes_and_drops_blank_types(client: TestClient) -> None:
             "/api/config",
             json={
                 "relevance_prompt": "keep\x00this",
-                "entity_types": ["Person", "  ", "", "Place"],
+                "entity_types": [
+                    {"name": "Person", "description": "sane\x00desc"},
+                    {"name": "  ", "description": "blank name dropped"},
+                    {"name": "", "description": "also dropped"},
+                    {"name": "Place", "description": ""},
+                ],
                 "relationship_types": [],
             },
             headers=LOCALHOST_ORIGIN,
@@ -132,7 +143,10 @@ def test_put_config_sanitizes_and_drops_blank_types(client: TestClient) -> None:
         assert put.status_code == 200
         body = put.json()
         assert body["relevance_prompt"] == "keepthis"
-        assert body["entity_types"] == ["Person", "Place"]
+        assert body["entity_types"] == [
+            {"name": "Person", "description": "sanedesc"},
+            {"name": "Place", "description": ""},
+        ]
     finally:
         _purge_user(email)
 

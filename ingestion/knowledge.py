@@ -62,15 +62,28 @@ def _chat(
     return content if isinstance(content, str) else None
 
 
+def _render_types(types: list[dict[str, str]]) -> str:
+    """One type per line as `- name: description`, so the extractor knows what each means."""
+    lines = []
+    for t in types:
+        name = t["name"]
+        description = (t.get("description") or "").strip()
+        lines.append(f"- {name}: {description}" if description else f"- {name}")
+    return "\n".join(lines)
+
+
 def build_extraction_messages(
-    entity_types: list[str], relationship_types: list[str], text: str
+    entity_types: list[dict[str, str]], relationship_types: list[dict[str, str]], text: str
 ) -> list[dict[str, str]]:
     system = (
-        f"Extract only entities of these types: {', '.join(entity_types)}. "
+        "Extract only entities of these types (use the exact names; the description explains what "
+        "each type means):\n"
+        f"{_render_types(entity_types)}\n\n"
         "For each entity, write a thorough, self-contained description capturing everything this "
-        "article says about it (who/what it is, key facts, context) — a rich paragraph, not a label. "
-        f"Also extract relationships between them, using only these relationship types: "
-        f"{', '.join(relationship_types)}. Use the exact type strings given; do not invent new ones."
+        "article says about it (who/what it is, key facts, context) — a rich paragraph, not a label.\n\n"
+        "Also extract relationships between them, using only these relationship types:\n"
+        f"{_render_types(relationship_types)}\n\n"
+        "Use the exact type names given; do not invent new ones."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
@@ -94,8 +107,8 @@ def _strict_schema(node: Any) -> Any:
 def extract_knowledge(
     client: OpenRouter,
     model: str,
-    entity_types: list[str],
-    relationship_types: list[str],
+    entity_types: list[dict[str, str]],
+    relationship_types: list[dict[str, str]],
     text: str,
     llm_params: dict[str, Any],
 ) -> KnowledgeExtraction:
@@ -297,12 +310,12 @@ class MergeResult(BaseModel):
 def merge_content(
     knowledge_base_id: str,
     content: str,
-    entity_types: list[str],
-    relationship_types: list[str],
+    entity_types: list[dict[str, str]],
+    relationship_types: list[dict[str, str]],
     job_id: str,
 ) -> MergeResult:
-    allowed_entities = {t.lower() for t in entity_types}
-    allowed_rels = {t.upper() for t in relationship_types}
+    allowed_entities = {t["name"].lower() for t in entity_types}
+    allowed_rels = {t["name"].upper() for t in relationship_types}
     llm_params: dict[str, Any] = {}
     created = merged = rels = 0
     name_to_id: dict[str, str] = {}

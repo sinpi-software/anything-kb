@@ -20,17 +20,25 @@ class JobStatusResponse(BaseModel):
     error: str | None = None
 
 
+class TypeDef(BaseModel):
+    """An entity or relationship type. The description guides the extractor on what
+    this type means in the user's domain; it's optional."""
+
+    name: str
+    description: str = ""
+
+
 class ConfigRequest(BaseModel):
     relevance_prompt: str
-    entity_types: list[str]
-    relationship_types: list[str]
+    entity_types: list[TypeDef]
+    relationship_types: list[TypeDef]
 
 
 class ConfigResponse(BaseModel):
     knowledge_base_id: str
     relevance_prompt: str
-    entity_types: list[str]
-    relationship_types: list[str]
+    entity_types: list[TypeDef]
+    relationship_types: list[TypeDef]
 
 
 # --- accounts (email/password auth) ----------------------------------------

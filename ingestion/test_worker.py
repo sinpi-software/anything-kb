@@ -36,8 +36,8 @@ def org_with_config():  # type: ignore[no-untyped-def]
             KnowledgeBaseConfig(
                 knowledge_base_id=knowledge_base.id,
                 relevance_prompt="anything",
-                entity_types=["Person"],
-                relationship_types=["KNOWS"],
+                entity_types=[{"name": "Person", "description": ""}],
+                relationship_types=[{"name": "KNOWS", "description": ""}],
             )
         )
         s.commit()

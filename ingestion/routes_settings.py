@@ -9,14 +9,19 @@ from accounts import current_user, home_knowledge_base_id, require_csrf
 from db import get_postgres_session
 from models import KnowledgeBaseConfig, User
 from sanitize import sanitize
-from schemas import ConfigRequest, ConfigResponse
+from schemas import ConfigRequest, ConfigResponse, TypeDef
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"], dependencies=[Depends(require_csrf)])
 
 
-def _clean_types(values: list[str]) -> list[str]:
-    """Sanitize, trim, and drop blanks — the UI can submit empty chips."""
-    return [cleaned for v in values if (cleaned := sanitize(v).strip())]
+def _clean_types(values: list[TypeDef]) -> list[dict[str, str]]:
+    """Sanitize name + description; drop entries with a blank name (the UI can submit empty rows)."""
+    cleaned: list[dict[str, str]] = []
+    for t in values:
+        name = sanitize(t.name).strip()
+        if name:
+            cleaned.append({"name": name, "description": sanitize(t.description).strip()})
+    return cleaned
 
 
 @router.get("", response_model=ConfigResponse)
@@ -36,8 +41,8 @@ def get_config(user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B
         return ConfigResponse(
             knowledge_base_id=knowledge_base_id,
             relevance_prompt=cfg.relevance_prompt if cfg else "",
-            entity_types=list(cfg.entity_types) if cfg else [],
-            relationship_types=list(cfg.relationship_types) if cfg else [],
+            entity_types=[TypeDef.model_validate(t) for t in cfg.entity_types] if cfg else [],
+            relationship_types=[TypeDef.model_validate(t) for t in cfg.relationship_types] if cfg else [],
         )
 
 
@@ -79,6 +84,6 @@ def put_config(
     return ConfigResponse(
         knowledge_base_id=knowledge_base_id,
         relevance_prompt=relevance_prompt,
-        entity_types=entity_types,
-        relationship_types=relationship_types,
+        entity_types=[TypeDef.model_validate(t) for t in entity_types],
+        relationship_types=[TypeDef.model_validate(t) for t in relationship_types],
     )

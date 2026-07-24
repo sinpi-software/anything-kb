@@ -367,6 +367,7 @@ def test_run_knowledge_writes_graph(monkeypatch: pytest.MonkeyPatch) -> None:
 
             transformation = Transformation(
                 org_id=org_id,
+                name="knowledge-e2e",
                 type=TransformationType.KNOWLEDGE.value,
                 model="test/model",
                 prompt="Extract entities.",

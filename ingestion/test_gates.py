@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("INGESTION_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+
 from sqlalchemy import inspect
 
 from db import get_postgres_session

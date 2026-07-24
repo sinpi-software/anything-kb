@@ -23,8 +23,20 @@ def _sanitize_json(value: Any) -> Any:
     return value
 
 
-@router.post("/content", status_code=status.HTTP_202_ACCEPTED, response_model=ContentAccepted)
+@router.post(
+    "/content",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ContentAccepted,
+    tags=["Content"],
+    summary="Submit content for ingestion",
+    responses={401: {"description": "Missing or invalid API key"}},
+)
 def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> ContentAccepted:
+    """Queue text for relevance filtering and knowledge extraction.
+
+    Returns immediately with a `job_id` (HTTP 202); processing happens asynchronously.
+    Poll `GET /content/{job_id}` for the outcome.
+    """
     with get_postgres_session() as session:
         job = IngestJob(
             org_id=org_id,
@@ -38,8 +50,19 @@ def post_content(body: ContentRequest, org_id: str = Depends(require_org)) -> Co
     return ContentAccepted(job_id=job_id)
 
 
-@router.get("/content/{job_id}", response_model=JobStatusResponse)
+@router.get(
+    "/content/{job_id}",
+    response_model=JobStatusResponse,
+    tags=["Content"],
+    summary="Check ingestion status",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        404: {"description": "No such job for this org"},
+    },
+)
 def get_content(job_id: str, org_id: str = Depends(require_org)) -> JobStatusResponse:
+    """Return a submitted item's status: `pending`, `processing`, `done`, `skipped`
+    (judged not relevant), or `failed`. Only the owning org can read a job."""
     try:
         uuid.UUID(job_id)
     except ValueError:

@@ -22,7 +22,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Knowledge Graph Engine", lifespan=lifespan)
+DESCRIPTION = """
+A **knowledge base for anything**. Submit any text; a relevance filter you define keeps what
+matters, entities and relationships are extracted into a typed graph, and you read it back
+over GraphQL.
+
+**Authentication** — every endpoint takes your API key as a Bearer token
+(`Authorization: Bearer <key>`). Click **Authorize** to try requests from this page.
+
+**GraphQL** — the read API and an interactive explorer live at [`/graphql`](/graphql).
+"""
+
+TAGS_METADATA = [
+    {"name": "Content", "description": "Submit content for ingestion and check a job's status."},
+    {"name": "Configuration", "description": "Set your relevance prompt and entity / relationship types."},
+]
+
+app = FastAPI(
+    title="Knowledge Graph Engine",
+    description=DESCRIPTION,
+    version="1.0.0",
+    openapi_tags=TAGS_METADATA,
+    lifespan=lifespan,
+)
 app.include_router(content_router)
 app.include_router(config_router)
 app.include_router(graphql_router, prefix="/graphql")

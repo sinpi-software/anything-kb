@@ -8,9 +8,10 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import text as sqlalchemy_text
 
-from auth import generate_api_key, hash_key, require_org
+from auth import generate_api_key, hash_key, require_org, resolve_org
 from db import get_postgres_session
 from models import ApiKey, Org
 
@@ -41,22 +42,24 @@ def test_hash_key_is_deterministic_and_hex() -> None:
     assert hash_key(key) != hash_key("other-key")
 
 
-def test_require_org_rejects_missing_token() -> None:
-    with pytest.raises(HTTPException) as exc:
-        require_org(authorization="")
-    assert exc.value.status_code == 401
+def test_resolve_org_rejects_missing_token() -> None:
+    for missing in (None, ""):
+        with pytest.raises(HTTPException) as exc:
+            resolve_org(missing)
+        assert exc.value.status_code == 401
 
 
-def test_require_org_rejects_non_bearer() -> None:
+def test_require_org_dependency_rejects_no_credentials() -> None:
+    # HTTPBearer yields None for a missing / non-Bearer header; the dependency 401s.
     with pytest.raises(HTTPException) as exc:
-        require_org(authorization="Basic abc")
+        require_org(creds=None)
     assert exc.value.status_code == 401
 
 
 @requires_postgres
-def test_require_org_rejects_unknown_key() -> None:
+def test_resolve_org_rejects_unknown_key() -> None:
     with pytest.raises(HTTPException) as exc:
-        require_org(authorization=f"Bearer {generate_api_key()}")
+        resolve_org(generate_api_key())
     assert exc.value.status_code == 401
 
 
@@ -74,22 +77,25 @@ def seeded_org() -> Iterator[Org]:
 
 
 @requires_postgres
-def test_require_org_resolves_valid_key_to_org_id(seeded_org: Org) -> None:
+def test_resolves_valid_key_to_org_id(seeded_org: Org) -> None:
     key = generate_api_key()
     with get_postgres_session() as session:
         session.add(ApiKey(org_id=seeded_org.id, key_hash=hash_key(key)))
         session.commit()
 
-    assert require_org(authorization=f"Bearer {key}") == str(seeded_org.id)
+    assert resolve_org(key) == str(seeded_org.id)
+    # and through the FastAPI dependency, with real Bearer credentials
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=key)
+    assert require_org(creds=creds) == str(seeded_org.id)
 
 
 @requires_postgres
-def test_require_org_rejects_revoked_key(seeded_org: Org) -> None:
+def test_resolve_org_rejects_revoked_key(seeded_org: Org) -> None:
     key = generate_api_key()
     with get_postgres_session() as session:
         session.add(ApiKey(org_id=seeded_org.id, key_hash=hash_key(key), revoked_at=datetime.now(UTC)))
         session.commit()
 
     with pytest.raises(HTTPException) as exc:
-        require_org(authorization=f"Bearer {key}")
+        resolve_org(key)
     assert exc.value.status_code == 401

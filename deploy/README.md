@@ -88,6 +88,13 @@ Copy the printed key — it authenticates `POST /content`, `PUT /config`, `/grap
   dashboard route at `http://ingestion-api.ingestion.svc.cluster.local:80` and skip
   `apiHostname`.
 
+## Marketing site
+
+The static landing page (`web/index.html`) is served by nginx from a ConfigMap at
+the host **root** (`/`); the API lives at `/content`, `/config`, `/graphql` on the
+same host (Traefik's longer-prefix rule wins). Edit `web/index.html` and `pulumi up`
+to update it — the pod rolls automatically on content change.
+
 ## Notes
 
 - **Single-node only** — `local-path` PVCs are node-local.

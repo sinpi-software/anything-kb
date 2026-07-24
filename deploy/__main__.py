@@ -11,6 +11,9 @@ README) and referenced here by tag. Pulumi only deploys the workloads:
 Runs against the cluster via KUBECONFIG (fetch the node's /etc/rancher/k3s/k3s.yaml).
 """
 
+import hashlib
+from pathlib import Path
+
 import pulumi
 import pulumi_kubernetes as k8s
 
@@ -207,31 +210,74 @@ api_svc = k8s.core.v1.Service(
     opts=pulumi.ResourceOptions(depends_on=[api_deploy]),
 )
 
+# --- marketing site (static, nginx serving web/index.html from a ConfigMap) ---
+marketing_html = Path(__file__).parent.joinpath("..", "web", "index.html").read_text()
+content_hash = hashlib.sha1(marketing_html.encode()).hexdigest()[:12]
+marketing_cm = k8s.core.v1.ConfigMap(
+    "marketing-html",
+    metadata=meta("marketing-html"),
+    data={"index.html": marketing_html},
+    opts=ns_opts,
+)
+marketing_deploy = k8s.apps.v1.Deployment(
+    "marketing",
+    metadata=meta("marketing"),
+    spec={
+        "replicas": 1,
+        "selector": {"matchLabels": {"app": "marketing"}},
+        "template": {
+            "metadata": {
+                "labels": {"app": "marketing"},
+                # roll the pod only when the HTML actually changes
+                "annotations": {"content-hash": content_hash},
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "nginx",
+                        "image": "nginx:1.27-alpine",
+                        "ports": [{"containerPort": 80}],
+                        "volumeMounts": [{"name": "html", "mountPath": "/usr/share/nginx/html", "readOnly": True}],
+                        "readinessProbe": {"tcpSocket": {"port": 80}, "periodSeconds": 10},
+                        "resources": {"requests": {"cpu": "20m", "memory": "24Mi"}, "limits": {"memory": "96Mi"}},
+                    }
+                ],
+                "volumes": [{"name": "html", "configMap": {"name": "marketing-html"}}],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[marketing_cm]),
+)
+marketing_svc = k8s.core.v1.Service(
+    "marketing",
+    metadata=meta("marketing"),
+    spec={"selector": {"app": "marketing"}, "ports": [{"port": 80, "targetPort": 80}]},
+    opts=pulumi.ResourceOptions(depends_on=[marketing_deploy]),
+)
+
 # Optional Traefik Ingress. The Cloudflare Tunnel forwards a hostname to Traefik
-# (hub pattern), so this exposes the API at that hostname: tunnel → traefik → here.
+# (hub pattern). One host serves both: the marketing site at "/", and the API at its
+# own prefixes — Traefik's longer-prefix rule routes /content, /config, /graphql to
+# the API and everything else to the marketing page.
 api_hostname = cfg.get("apiHostname")
 if api_hostname:
+    api_paths = [
+        {"path": p, "pathType": "Prefix", "backend": {"service": {"name": "ingestion-api", "port": {"number": 80}}}}
+        for p in ("/content", "/config", "/graphql")
+    ]
+    marketing_path = {
+        "path": "/",
+        "pathType": "Prefix",
+        "backend": {"service": {"name": "marketing", "port": {"number": 80}}},
+    }
     k8s.networking.v1.Ingress(
-        "ingestion-api",
-        metadata=meta("ingestion-api"),
+        "site",
+        metadata=meta("site"),
         spec={
             "ingressClassName": "traefik",
-            "rules": [
-                {
-                    "host": api_hostname,
-                    "http": {
-                        "paths": [
-                            {
-                                "path": "/",
-                                "pathType": "Prefix",
-                                "backend": {"service": {"name": "ingestion-api", "port": {"number": 80}}},
-                            }
-                        ]
-                    },
-                }
-            ],
+            "rules": [{"host": api_hostname, "http": {"paths": api_paths + [marketing_path]}}],
         },
-        opts=pulumi.ResourceOptions(depends_on=[api_svc]),
+        opts=pulumi.ResourceOptions(depends_on=[api_svc, marketing_svc]),
     )
 
 

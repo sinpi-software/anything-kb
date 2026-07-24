@@ -89,7 +89,8 @@ def seed_database() -> None:
             title="Hacker News",
         )
 
-        # Ordered transform chain for the org — each step's output feeds the next (by position).
+        # Transform chain for the org — every step reads the source article (fan-out); gates
+        # reference an earlier step's output by name and halt the chain when unmet.
         transform_model = "openai/gpt-5-nano"
         transform_chain = [
             (

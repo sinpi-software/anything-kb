@@ -128,15 +128,6 @@ class IngestJob(_BaseModel):
     processed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
-class OrgSettings(_AuthoredModel):
-    __tablename__ = "org_settings"
-    __table_args__ = (UniqueConstraint("org_id", "setting_name"),)
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="settings")
-    setting_name: Mapped[str] = mapped_column(TEXT, nullable=False)
-    setting_value: Mapped[str] = mapped_column(TEXT, nullable=True)
-
-
 class OrgUser(_AuthoredModel):
     __tablename__ = "org_users"
     org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
@@ -144,27 +135,3 @@ class OrgUser(_AuthoredModel):
     org: Mapped["Org"] = relationship("Org", backref="users")
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id], backref="orgs")
     role: Mapped[str] = mapped_column(TEXT, nullable=False)  # e.g., 'admin', 'member', etc.
-
-
-class AppSettings(_AuthoredModel):
-    __tablename__ = "app_settings"
-    __table_args__ = (UniqueConstraint("setting_name"),)
-    setting_name: Mapped[str] = mapped_column(TEXT, nullable=False)
-    setting_value: Mapped[str] = mapped_column(TEXT, nullable=True)
-
-
-class WikiPage(_AuthoredModel):
-    __tablename__ = "wiki_pages"
-    org_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
-    org: Mapped["Org"] = relationship("Org", backref="wiki_pages")
-    title: Mapped[str] = mapped_column(TEXT, nullable=False)
-    content: Mapped[str] = mapped_column(TEXT, nullable=True)
-
-
-class WikiPageVersion(_AuthoredModel):
-    __tablename__ = "wiki_page_versions"
-    __table_args__ = (UniqueConstraint("page_id", "version_number"),)
-    page_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("wiki_pages.id"), nullable=False)
-    page: Mapped["WikiPage"] = relationship("WikiPage", backref="versions")
-    version_number: Mapped[int] = mapped_column(nullable=False)
-    content: Mapped[str] = mapped_column(TEXT, nullable=True)

@@ -465,7 +465,20 @@ def consolidate_types(
     if out is None:
         raise ValueError("type consolidation returned no content")
     result = TypeConsolidation.model_validate_json(out)
-    return {_norm_type(d.candidate): d.model_dump(exclude={"candidate"}) for d in result.decisions}
+    # The model echoes each candidate back, often including the ` (e.g. "…")` example
+    # suffix we render. Key by the ORIGINAL candidate so callers can look decisions up
+    # by the bare type name; match the echo to the original by longest normalized prefix.
+    originals = {_norm_type(c): c for c in candidates}
+    decisions: dict[str, dict[str, str]] = {}
+    for d in result.decisions:
+        echoed = _norm_type(d.candidate)
+        key = (
+            echoed
+            if echoed in originals
+            else max((n for n in originals if echoed.startswith(n)), key=len, default=echoed)
+        )
+        decisions[key] = d.model_dump(exclude={"candidate"})
+    return decisions
 
 
 def merge_content(

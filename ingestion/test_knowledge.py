@@ -371,6 +371,38 @@ def test_consolidate_types_entity_uses_wiki_criterion_and_renders_example(
     assert out[knowledge_mod._norm_type("TimeWindow")]["decision"] == "drop"
 
 
+def test_consolidate_types_maps_echoed_example_suffix_back_to_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real models echo the candidate WITH the ` (e.g. "…")` suffix we render. The result
+    must still be keyed by the bare candidate name, or merge_content drops every novel type."""
+
+    def fake_chat(client: Any, model: str, messages: list[dict[str, str]], llm_params: Any, schema: Any) -> str:
+        return TypeConsolidation(
+            decisions=[
+                TypeDecision(candidate='Event (e.g. "Airplane crash")', decision="new", name="Event", description="d"),
+                TypeDecision(
+                    candidate='Organization (e.g. "FAA")', decision="new", name="Organization", description="d"
+                ),
+            ]
+        ).model_dump_json()
+
+    monkeypatch.setattr(knowledge_mod, "_chat", fake_chat)
+    out = knowledge_mod.consolidate_types(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        kind="entity",
+        candidates=["Event", "Organization"],
+        vocab=[],
+        interests="civic",
+        llm_params={},
+        examples={"Event": "Airplane crash", "Organization": "FAA"},
+    )
+    # Keyed by the bare candidate norm, despite the echoed example suffix.
+    assert out[knowledge_mod._norm_type("Event")]["name"] == "Event"
+    assert out[knowledge_mod._norm_type("Organization")]["name"] == "Organization"
+
+
 def test_consolidate_types_relationship_keeps_distinctness_criterion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

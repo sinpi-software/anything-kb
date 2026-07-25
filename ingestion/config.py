@@ -2,10 +2,11 @@
 
 # --- LLM (OpenRouter) ---
 OPENROUTER_API_KEY_ENV = "INGESTION_OPENROUTER_API_KEY"
-# Default model for relevance judging and knowledge extraction. gpt-5-nano was too
-# weak to follow the extraction salience guardrails (kept coining TimeWindow/fragment
-# types despite explicit instruction not to); mini follows the negative instructions.
-LLM_MODEL = "openai/gpt-5-mini"
+# Default model for relevance judging, extraction, resolution, and synthesis.
+LLM_MODEL = "openai/gpt-5-nano"
+# The salience/type-admission gate (consolidate_types) runs on a more capable model:
+# it is low-volume (once per novel type) and is the sole guard against fragment types.
+TYPE_GATE_MODEL = "openai/gpt-5-mini"
 # Per-request timeout. Without it a stuck reasoning model hangs the worker forever.
 LLM_TIMEOUT_MS = 90_000
 # Max concurrent OpenRouter calls, enforced by a threading.Semaphore in knowledge._chat.

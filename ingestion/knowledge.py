@@ -500,6 +500,7 @@ def merge_content(
             banned: set[str],
             new_out: list[dict[str, str]],
             vocab: list[dict[str, str]],
+            examples: dict[str, str],
         ) -> Callable[[str], str | None]:
             unmatched = sorted(
                 {t for t in extracted_types if _norm_type(t) not in canon and _norm_type(t) not in banned}
@@ -508,7 +509,7 @@ def merge_content(
             if discover and unmatched:
                 try:
                     decisions = consolidate_types(
-                        client, config.LLM_MODEL, kind, unmatched, vocab, interests, llm_params
+                        client, config.TYPE_GATE_MODEL, kind, unmatched, vocab, interests, llm_params, examples=examples
                     )
                 except Exception:
                     decisions = {}  # fast-path fallback: known types kept, novel deferred
@@ -534,8 +535,17 @@ def merge_content(
 
             return resolve
 
+        entity_examples: dict[str, str] = {}
+        for e in extraction.entities:
+            entity_examples.setdefault(e.type, e.name)
         resolve_entities = resolve_kind(
-            "entity", {e.type for e in extraction.entities}, entity_canon, banned_ent, new_entity_types, active_entities
+            "entity",
+            {e.type for e in extraction.entities},
+            entity_canon,
+            banned_ent,
+            new_entity_types,
+            active_entities,
+            entity_examples,
         )
         entities = []
         for e in extraction.entities:
@@ -563,6 +573,9 @@ def merge_content(
             write_provenance(neo, knowledge_base_id, entity_id, job_id, label=source_label, date=source_date)
             name_to_id[normalize_name(entity.name)] = entity_id
 
+        rel_examples: dict[str, str] = {}
+        for r in extraction.relationships:
+            rel_examples.setdefault(r.type, f"{r.source_name} -> {r.target_name}")
         resolve_rels = resolve_kind(
             "relationship",
             {r.type for r in extraction.relationships},
@@ -570,6 +583,7 @@ def merge_content(
             banned_rel,
             new_relationship_types,
             active_rels,
+            rel_examples,
         )
         for rel in extraction.relationships:
             canonical = resolve_rels(rel.type)

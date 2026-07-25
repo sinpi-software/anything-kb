@@ -14,6 +14,7 @@ os.environ.setdefault("INGESTION_NEO4J_PASSWORD", "ingestion")
 os.environ.setdefault("INGESTION_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
 os.environ.setdefault("INGESTION_OPENROUTER_API_KEY", "test-key-not-used")
 
+import config  # noqa: E402
 import knowledge as knowledge_mod  # noqa: E402
 from db import get_postgres_session  # noqa: E402
 from knowledge import (  # noqa: E402
@@ -868,3 +869,77 @@ def test_merge_content_existing_entity_synthesizes_article_and_stores_result(
             assert row["s"] == "New abstract."
     finally:
         _cleanup(knowledge_base_id)
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_passes_examples_and_gate_model_and_drops_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_schema()
+    extraction = KnowledgeExtraction(
+        entities=[
+            ExtractedEntity(name="7:00 a.m.-3:30 p.m.", type="TimeWindow", description="a work window"),
+            ExtractedEntity(name="Harry Morgan Bridge", type="Bridge", description="a bridge"),
+        ],
+        relationships=[],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+
+    captured: dict[str, Any] = {}
+
+    def fake_consolidate(
+        client: Any,
+        model: str,
+        kind: str,
+        candidates: Any,
+        vocab: Any,
+        interests: str,
+        llm_params: Any,
+        examples: Any = None,
+    ) -> dict[str, dict[str, str]]:
+        captured[kind] = {"model": model, "examples": examples}
+        return {
+            knowledge_mod._norm_type("TimeWindow"): {"decision": "drop"},
+            knowledge_mod._norm_type("Bridge"): {"decision": "new", "name": "Bridge", "description": "a bridge"},
+        }
+
+    monkeypatch.setattr(knowledge_mod, "consolidate_types", fake_consolidate)
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            "Bridge work 7:00 a.m.-3:30 p.m.",
+            [{"name": "Person", "description": ""}],  # neither type is pre-known -> both go through the gate
+            [],
+            job_id,
+            discover=True,
+        )
+        # Example instance for the fragment type was threaded into the gate, on the gate model.
+        assert captured["entity"]["examples"]["TimeWindow"] == "7:00 a.m.-3:30 p.m."
+        assert captured["entity"]["model"] == config.TYPE_GATE_MODEL
+        # TimeWindow dropped, Bridge admitted -> exactly one entity written.
+        assert result.entities_created == 1
+        with get_neo4j_session() as neo:
+            types = {
+                r["t"]
+                for r in neo.run(
+                    "MATCH (e:Entity {knowledge_base_id: $o}) RETURN e.type AS t",
+                    {"o": knowledge_base_id},
+                )
+            }
+        assert types == {"Bridge"}
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})

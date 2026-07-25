@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import text as sqltext
 
 import config
-from graph_read import query_edges, query_references
+from graph_read import query_edges, query_references, query_related
 from knowledge import ExtractedEntity, upsert_entity, write_provenance, write_relationship
 from neo4j_client import bootstrap_schema, get_neo4j_session
 
@@ -273,3 +273,25 @@ def test_query_references_excludes_cross_knowledge_base_source() -> None:
                 "MATCH (n) WHERE n.knowledge_base_id IN [$a, $b] DETACH DELETE n",
                 {"a": knowledge_base_a, "b": knowledge_base_b},
             )
+
+
+@requires_stack
+def test_query_related_returns_two_hop_neighbours_only() -> None:
+    # A-R1->B-R2->C and A-R3->D. From A, only C is a 2-hop neighbour: not A (self),
+    # not B/D (direct). knowledge_base-scoped on every hop.
+    from knowledge import ExtractedEntity, upsert_entity, write_relationship
+
+    bootstrap_schema()
+    kb = f"rel-{uuid.uuid4()}"
+    a, b, c, d = (str(uuid.uuid4()) for _ in range(4))
+    try:
+        with get_neo4j_session() as s:
+            for nid, nm in ((a, "A"), (b, "B"), (c, "C"), (d, "D")):
+                upsert_entity(s, kb, nid, ExtractedEntity(name=nm, type="Thing", description="x"), "sum", "art")
+            write_relationship(s, kb, a, b, "R1", "j")
+            write_relationship(s, kb, b, c, "R2", "j")
+            write_relationship(s, kb, a, d, "R3", "j")
+        assert {r["name"] for r in query_related(kb, a)} == {"C"}
+    finally:
+        with get_neo4j_session() as s:
+            s.run("MATCH (n) WHERE n.knowledge_base_id = $k DETACH DELETE n", {"k": kb})

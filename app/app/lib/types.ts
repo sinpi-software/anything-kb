@@ -50,5 +50,6 @@ export interface EntityPage {
   summary: string | null;
   article: string | null;
   edges: { type: string; target: { id: string; name: string; type: string } }[];
+  related: { id: string; name: string; type: string }[];
   references: { label: string; date: string }[];
 }

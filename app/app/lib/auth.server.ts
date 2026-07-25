@@ -60,7 +60,7 @@ export async function getConfig(request: Request): Promise<KbConfig> {
 export async function getEntity(request: Request, id: string): Promise<EntityPage | null> {
   const query =
     "query($id: ID!) { node(id: $id) { id name type summary article " +
-    "edges { type target { id name type } } references { label date } } }";
+    "edges { type target { id name type } } related { id name type } references { label date } } }";
   try {
     const res = await fetch(`${INTERNAL_API_URL}/api/graphql`, {
       method: "POST",

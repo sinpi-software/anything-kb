@@ -36,6 +36,12 @@ class Node:
         rows = graph_read.query_references(self.knowledge_base_id, str(self.id))
         return [Reference(label=r.get("label") or "", date=r.get("date") or "") for r in rows]
 
+    @strawberry.field
+    def related(self) -> list["Node"]:
+        """Entities two hops away (second-degree neighbours), knowledge_base-scoped."""
+        rows = graph_read.query_related(self.knowledge_base_id, str(self.id))
+        return [_to_node(row, self.knowledge_base_id) for row in rows]
+
 
 @strawberry.type
 class Edge:

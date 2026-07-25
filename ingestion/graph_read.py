@@ -71,3 +71,21 @@ def query_references(knowledge_base_id: str, entity_id: str) -> list[dict[str, A
                 {"id": entity_id, "kb": knowledge_base_id},
             )
         ]
+
+
+def query_related(knowledge_base_id: str, entity_id: str) -> list[dict[str, Any]]:
+    """Entities exactly two relationship-hops away (second-degree neighbours) — excluding the
+    entity itself and its direct neighbours. knowledge_base-scoped on every hop of the path."""
+    with get_neo4j_session() as session:
+        return [
+            dict(r)
+            for r in session.run(
+                "MATCH path=(e:Entity {id: $id, knowledge_base_id: $kb})"
+                "-[:RELATED*2..2]-(n:Entity {knowledge_base_id: $kb}) "
+                "WHERE n.id <> $id AND NOT (e)-[:RELATED]-(n) "
+                "AND ALL(rel IN relationships(path) WHERE rel.knowledge_base_id = $kb) "
+                "RETURN DISTINCT n.id AS id, n.type AS type, n.name AS name, n.summary AS summary "
+                "ORDER BY n.name",
+                {"id": entity_id, "kb": knowledge_base_id},
+            )
+        ]

@@ -40,6 +40,13 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
   }
   const body = entity.article || entity.summary || "";
 
+  const relatedGroups = new Map<string, typeof entity.related>();
+  for (const r of entity.related) {
+    const arr = relatedGroups.get(r.type) ?? [];
+    arr.push(r);
+    relatedGroups.set(r.type, arr);
+  }
+
   async function handleLogout() {
     await logout();
     await navigate("/login");
@@ -81,6 +88,27 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
                     {edges.map((e) => (
                       <Link key={e.target.id} to={`/app/entity/${e.target.id}`} className="text-accent hover:underline">
                         {e.target.name} <span className="text-muted">· {e.target.type}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {entity.related.length > 0 ? (
+          <section className="mt-10">
+            <h2 className="font-display text-sm font-semibold tracking-wide text-muted uppercase">Related</h2>
+            <p className="mt-1 text-xs text-muted">Entities two hops away in the graph.</p>
+            <div className="mt-3 flex flex-col gap-3">
+              {[...relatedGroups.entries()].map(([type, ents]) => (
+                <div key={type} className="flex flex-col gap-1 sm:flex-row sm:gap-3">
+                  <span className="font-display text-sm text-muted sm:w-40 sm:flex-none">{type}</span>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {ents.map((e) => (
+                      <Link key={e.id} to={`/app/entity/${e.id}`} className="text-accent hover:underline">
+                        {e.name}
                       </Link>
                     ))}
                   </div>

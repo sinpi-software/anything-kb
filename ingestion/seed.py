@@ -73,7 +73,8 @@ def seed_database() -> None:
             session,
             KnowledgeBaseConfig,
             defaults={
-                "relevance_prompt": "Is this content about technology, science, or business news?",
+                "interests": "Is this content about technology, science, or business news?",
+                "discover_types": True,
                 "entity_types": [
                     {"name": "Person", "description": "A specific, named individual human."},
                     {"name": "Organization", "description": "A company, agency, institution, or group."},

@@ -24,3 +24,5 @@ def bootstrap_schema() -> None:
     with get_neo4j_session() as session:
         session.run("CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE")
         session.run("CREATE FULLTEXT INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON EACH [e.name, e.aliases]")
+        # Backs the `sources(since:)` recency query, which orders/filters on Source.ingested_at.
+        session.run("CREATE RANGE INDEX source_ingested_at IF NOT EXISTS FOR (s:Source) ON (s.ingested_at)")

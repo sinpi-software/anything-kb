@@ -4,12 +4,19 @@ import config
 from knowledge import escape_lucene
 from neo4j_client import get_neo4j_session
 
-_NODE_RETURN = "RETURN e.id AS id, e.type AS type, e.name AS name, e.summary AS summary, e.article AS article"
+_NODE_RETURN = (
+    "RETURN e.id AS id, e.type AS type, e.name AS name, e.summary AS summary, e.article AS article, "
+    "toString(e.created_at) AS created_at, toString(e.updated_at) AS updated_at"
+)
 
 
-def query_nodes(knowledge_base_id: str, type_: str | None, search: str | None, limit: int) -> list[dict[str, Any]]:
+def query_nodes(
+    knowledge_base_id: str, type_: str | None, search: str | None, since: str | None, limit: int
+) -> list[dict[str, Any]]:
     limit = min(max(limit, 1), config.NODES_MAX_LIMIT)
     params: dict[str, Any] = {"knowledge_base_id": knowledge_base_id, "limit": limit}
+    if since:
+        params["since"] = since
     if search:
         cypher = (
             "CALL db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS e, score "
@@ -19,13 +26,45 @@ def query_nodes(knowledge_base_id: str, type_: str | None, search: str | None, l
         if type_:
             cypher += "AND e.type = $type "
             params["type"] = type_
-        cypher += f"{_NODE_RETURN} ORDER BY score DESC LIMIT $limit"
+        if since:
+            cypher += f"AND e.updated_at >= datetime($since) {_NODE_RETURN} ORDER BY e.updated_at DESC LIMIT $limit"
+        else:
+            cypher += f"{_NODE_RETURN} ORDER BY score DESC LIMIT $limit"
     else:
         cypher = "MATCH (e:Entity {knowledge_base_id: $knowledge_base_id}) "
+        conds = []
         if type_:
-            cypher += "WHERE e.type = $type "
+            conds.append("e.type = $type")
             params["type"] = type_
-        cypher += f"{_NODE_RETURN} LIMIT $limit"
+        if since:
+            conds.append("e.updated_at >= datetime($since)")
+        if conds:
+            cypher += "WHERE " + " AND ".join(conds) + " "
+        order = "ORDER BY e.updated_at DESC " if since else ""
+        cypher += f"{_NODE_RETURN} {order}LIMIT $limit"
+    with get_neo4j_session() as session:
+        return [dict(r) for r in session.run(cypher, params)]
+
+
+def query_sources(knowledge_base_id: str, since: str | None, limit: int) -> list[dict[str, Any]]:
+    """Recent Source nodes, newest-ingested first, each with the entities that mention it.
+    knowledge_base-scoped on the Source and on every mentioned Entity."""
+    limit = min(max(limit, 1), config.NODES_MAX_LIMIT)
+    params: dict[str, Any] = {"kb": knowledge_base_id, "limit": limit}
+    where = ""
+    if since:
+        where = "WHERE s.ingested_at >= datetime($since) "
+        params["since"] = since
+    cypher = (
+        "MATCH (s:Source {knowledge_base_id: $kb}) "
+        f"{where}"
+        "RETURN s.job_id AS id, s.label AS label, "
+        "toString(s.published_at) AS published_at, toString(s.ingested_at) AS ingested_at, "
+        "[(s)<-[:MENTIONED_IN]-(e:Entity {knowledge_base_id: $kb}) | "
+        "{id: e.id, type: e.type, name: e.name, summary: e.summary, article: e.article, "
+        "created_at: toString(e.created_at), updated_at: toString(e.updated_at)}] AS entities "
+        "ORDER BY s.ingested_at DESC LIMIT $limit"
+    )
     with get_neo4j_session() as session:
         return [dict(r) for r in session.run(cypher, params)]
 

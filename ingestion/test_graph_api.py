@@ -297,3 +297,112 @@ def test_query_related_returns_two_hop_neighbours_only() -> None:
     finally:
         with get_neo4j_session() as s:
             s.run("MATCH (n) WHERE n.knowledge_base_id = $k DETACH DELETE n", {"k": kb})
+
+
+@requires_stack
+def test_nodes_without_since_returns_full_knowledge_base(seeded) -> None:  # type: ignore[no-untyped-def]
+    # No `since`: behave exactly as before — both knowledge_base_a entities, no date filter.
+    client, key, _kb, _ada, _eng, _kb_b, _secret = seeded
+    resp = _gql(client, key, "{ nodes { name } }")
+    assert {n["name"] for n in resp.json()["data"]["nodes"]} == {"Ada", "Engine"}
+
+
+@requires_stack
+def test_nodes_since_filters_and_orders_newest_first(seeded) -> None:  # type: ignore[no-untyped-def]
+    client, key, kb, ada_id, eng_id, _kb_b, _secret = seeded
+    with get_neo4j_session() as s:
+        s.run(
+            "MATCH (e:Entity {id: $id, knowledge_base_id: $kb}) SET e.updated_at = datetime('2026-01-01T00:00:00')",
+            {"id": ada_id, "kb": kb},
+        )
+        s.run(
+            "MATCH (e:Entity {id: $id, knowledge_base_id: $kb}) SET e.updated_at = datetime('2026-06-01T00:00:00')",
+            {"id": eng_id, "kb": kb},
+        )
+    # cutoff between the two: only Engine qualifies
+    resp = _gql(client, key, '{ nodes(since: "2026-03-01T00:00:00") { name } }')
+    assert [n["name"] for n in resp.json()["data"]["nodes"]] == ["Engine"]
+    # cutoff before both: both returned, most-recently-updated first
+    resp2 = _gql(client, key, '{ nodes(since: "2025-01-01T00:00:00") { name } }')
+    assert [n["name"] for n in resp2.json()["data"]["nodes"]] == ["Engine", "Ada"]
+
+
+@requires_stack
+def test_nodes_expose_created_and_updated_as_iso(seeded) -> None:  # type: ignore[no-untyped-def]
+    import re
+
+    client, key, _kb, _ada, _eng, _kb_b, _secret = seeded
+    resp = _gql(client, key, "{ nodes { name createdAt updatedAt } }")
+    nodes = resp.json()["data"]["nodes"]
+    assert nodes
+    iso = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")  # nanosecond-precision ISO from toString
+    for n in nodes:
+        assert iso.match(n["createdAt"]), n["createdAt"]
+        assert iso.match(n["updatedAt"]), n["updatedAt"]
+
+
+@requires_stack
+def test_nodes_malformed_since_is_graphql_error_not_500(seeded) -> None:  # type: ignore[no-untyped-def]
+    client, key, _kb, _ada, _eng, _kb_b, _secret = seeded
+    resp = _gql(client, key, '{ nodes(since: "not-a-timestamp") { name } }')
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("errors")
+    assert "since" in body["errors"][0]["message"]
+
+
+@requires_stack
+def test_sources_returns_recent_sources_with_mentioned_entities(seeded) -> None:  # type: ignore[no-untyped-def]
+    client, key, kb, _ada, _eng, _kb_b, _secret = seeded
+    # the seeded "Ada Source" has a publish date but no ingest date; give it one so it passes the filter
+    with get_neo4j_session() as s:
+        s.run(
+            "MATCH (src:Source {knowledge_base_id: $kb, job_id: 'job-ada'}) "
+            "SET src.ingested_at = datetime('2026-05-01T00:00:00')",
+            {"kb": kb},
+        )
+    resp = _gql(
+        client,
+        key,
+        '{ sources(since: "2026-01-01T00:00:00") { id label publishedAt ingestedAt entities { name } } }',
+    )
+    sources = resp.json()["data"]["sources"]
+    ada_src = next(s for s in sources if s["label"] == "Ada Source")
+    assert ada_src["id"] == "job-ada"
+    assert ada_src["ingestedAt"].startswith("2026-05-01")
+    assert ada_src["publishedAt"].startswith("2024-01-01")
+    assert "Ada" in {e["name"] for e in ada_src["entities"]}
+
+
+@requires_stack
+def test_sources_never_leaks_other_knowledge_base(seeded) -> None:  # type: ignore[no-untyped-def]
+    # Make KB-B's "Secret Source" a genuine candidate (recent ingested_at) and KB-A's a visible one.
+    # Only knowledge-base scoping — not the date filter — may keep KB-B out. This is the leak that matters.
+    client, key, kb, _ada, _eng, knowledge_base_b, _secret = seeded
+    with get_neo4j_session() as s:
+        s.run(
+            "MATCH (src:Source {knowledge_base_id: $a, job_id: 'job-ada'}) "
+            "SET src.ingested_at = datetime('2026-05-01T00:00:00')",
+            {"a": kb},
+        )
+        s.run(
+            "MATCH (src:Source {knowledge_base_id: $b, job_id: 'job-secret'}) "
+            "SET src.ingested_at = datetime('2026-05-02T00:00:00')",
+            {"b": knowledge_base_b},
+        )
+    resp = _gql(client, key, '{ sources(since: "2026-01-01T00:00:00") { label } }')
+    labels = {s["label"] for s in resp.json()["data"]["sources"]}
+    assert "Ada Source" in labels  # KB-A's own source is visible
+    assert "Secret Source" not in labels  # KB-B's never leaks, despite qualifying on date
+
+
+@requires_stack
+def test_sources_null_published_at_does_not_break(seeded) -> None:  # type: ignore[no-untyped-def]
+    client, key, kb, ada_id, _eng, _kb_b, _secret = seeded
+    with get_neo4j_session() as s:  # producer gave no publish date -> stored null; ingest date set
+        write_provenance(s, kb, ada_id, "job-nodate", label="No Date Source", ingested_at="2026-05-03T00:00:00")
+    resp = _gql(client, key, '{ sources(since: "2026-01-01T00:00:00") { label publishedAt ingestedAt } }')
+    assert resp.status_code == 200
+    nodate = next(s for s in resp.json()["data"]["sources"] if s["label"] == "No Date Source")
+    assert nodate["publishedAt"] is None
+    assert nodate["ingestedAt"].startswith("2026-05-03")

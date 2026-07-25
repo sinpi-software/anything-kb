@@ -2,13 +2,26 @@ from typing import Any
 
 import strawberry
 from fastapi import Depends, HTTPException, status
+from graphql import GraphQLError
 from strawberry.fastapi import GraphQLRouter
 
 import graph_read
 from accounts import current_user, home_knowledge_base_id
 from auth import require_knowledge_base
 from db import get_postgres_session
+from knowledge import _iso_or_empty
 from models import User
+
+
+def _normalize_since(since: str | None) -> str | None:
+    """None/empty -> no filter. A non-empty but unparseable value is a client error, surfaced as a
+    GraphQL error rather than a raw datetime() stack trace from Neo4j."""
+    if not since:
+        return None
+    iso = _iso_or_empty(since)
+    if not iso:
+        raise GraphQLError(f"invalid `since` timestamp: {since!r}")
+    return iso
 
 
 @strawberry.type
@@ -24,6 +37,8 @@ class Node:
     name: str
     summary: str | None
     article: str | None
+    created_at: str | None
+    updated_at: str | None
     knowledge_base_id: strawberry.Private[str]
 
     @strawberry.field
@@ -56,19 +71,37 @@ def _to_node(row: dict[str, Any], knowledge_base_id: str) -> Node:
         name=row["name"],
         summary=row["summary"],
         article=row.get("article"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
         knowledge_base_id=knowledge_base_id,
     )
+
+
+@strawberry.type
+class SourceResult:
+    id: strawberry.ID
+    label: str
+    published_at: str | None
+    ingested_at: str | None
+    entities: list[Node]
 
 
 @strawberry.type
 class Query:
     @strawberry.field
     def nodes(
-        self, info: strawberry.Info, type: str | None = None, search: str | None = None, limit: int = 50
+        self,
+        info: strawberry.Info,
+        type: str | None = None,
+        search: str | None = None,
+        since: str | None = None,
+        limit: int = 50,
     ) -> list[Node]:
         knowledge_base_id: str = info.context["knowledge_base_id"]
+        since_iso = _normalize_since(since)
         return [
-            _to_node(row, knowledge_base_id) for row in graph_read.query_nodes(knowledge_base_id, type, search, limit)
+            _to_node(row, knowledge_base_id)
+            for row in graph_read.query_nodes(knowledge_base_id, type, search, since_iso, limit)
         ]
 
     @strawberry.field
@@ -76,6 +109,21 @@ class Query:
         knowledge_base_id: str = info.context["knowledge_base_id"]
         row = graph_read.query_node(knowledge_base_id, str(id))
         return _to_node(row, knowledge_base_id) if row else None
+
+    @strawberry.field
+    def sources(self, info: strawberry.Info, since: str | None = None, limit: int = 50) -> list[SourceResult]:
+        knowledge_base_id: str = info.context["knowledge_base_id"]
+        since_iso = _normalize_since(since)
+        return [
+            SourceResult(
+                id=strawberry.ID(str(row["id"])),
+                label=row["label"] or "",
+                published_at=row.get("published_at"),
+                ingested_at=row.get("ingested_at"),
+                entities=[_to_node(e, knowledge_base_id) for e in row["entities"]],
+            )
+            for row in graph_read.query_sources(knowledge_base_id, since_iso, limit)
+        ]
 
 
 schema = strawberry.Schema(query=Query)

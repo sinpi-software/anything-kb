@@ -56,6 +56,8 @@ def process_job(job_id: str) -> None:
         discover = bool(cfg.discover_types) if cfg else False
         entity_types = list(cfg.entity_types) if cfg else []
         relationship_types = list(cfg.relationship_types) if cfg else []
+        source_label = (job.job_metadata or {}).get("source", "") if job.job_metadata else ""
+        source_date = job.created_at.isoformat() if job.created_at else ""
 
     try:
         verdict = judge_relevance(interests, content)
@@ -63,7 +65,15 @@ def process_job(job_id: str) -> None:
             _finalize(job_id, JobStatus.SKIPPED, relevance_reason=verdict.reason)
             return
         result = merge_content(
-            knowledge_base_id, content, entity_types, relationship_types, job_id, interests=interests, discover=discover
+            knowledge_base_id,
+            content,
+            entity_types,
+            relationship_types,
+            job_id,
+            interests=interests,
+            discover=discover,
+            source_label=source_label,
+            source_date=source_date,
         )
         _persist_new_types(knowledge_base_id, result.new_entity_types, result.new_relationship_types)
         _finalize(job_id, JobStatus.DONE, relevance_reason=verdict.reason)

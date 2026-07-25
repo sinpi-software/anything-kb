@@ -336,12 +336,21 @@ def write_relationship(
     )
 
 
-def write_provenance(session: Session, knowledge_base_id: str, entity_id: str, job_id: str) -> None:
+def write_provenance(
+    session: Session, knowledge_base_id: str, entity_id: str, job_id: str, *, label: str = "", date: str = ""
+) -> None:
     session.run(
         "MERGE (s:Source {knowledge_base_id: $knowledge_base_id, job_id: $job_id}) "
+        "SET s.label = $label, s.date = $date "
         "WITH s MATCH (e:Entity {id: $entity_id, knowledge_base_id: $knowledge_base_id}) "
         "MERGE (e)-[:MENTIONED_IN]->(s)",
-        {"knowledge_base_id": knowledge_base_id, "job_id": job_id, "entity_id": entity_id},
+        {
+            "knowledge_base_id": knowledge_base_id,
+            "job_id": job_id,
+            "entity_id": entity_id,
+            "label": label,
+            "date": date,
+        },
     )
 
 
@@ -424,6 +433,8 @@ def merge_content(
     *,
     interests: str = "",
     discover: bool = False,
+    source_label: str = "",
+    source_date: str = "",
 ) -> MergeResult:
     active_entities = [t for t in entity_types if not t.get("banned")]
     active_rels = [t for t in relationship_types if not t.get("banned")]
@@ -517,7 +528,7 @@ def merge_content(
                 article, summary = result.article, result.abstract
                 merged += 1
             upsert_entity(neo, knowledge_base_id, entity_id, entity, summary, article)
-            write_provenance(neo, knowledge_base_id, entity_id, job_id)
+            write_provenance(neo, knowledge_base_id, entity_id, job_id, label=source_label, date=source_date)
             name_to_id[normalize_name(entity.name)] = entity_id
 
         resolve_rels = resolve_kind(

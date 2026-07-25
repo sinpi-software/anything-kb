@@ -395,6 +395,7 @@ def test_consolidate_types_relationship_keeps_distinctness_criterion(
     system = captured["messages"][0]["content"]
     assert "Funds vs Sponsors" in system  # existing distinctness guidance retained
     assert "wiki page" not in system  # durability test is entity-only
+    assert "sentence case" in system  # new relationship types must be named in sentence case
 
 
 def _cleanup(knowledge_base_id: str) -> None:

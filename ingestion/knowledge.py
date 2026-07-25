@@ -437,7 +437,8 @@ def consolidate_types(
         criterion = (
             "Choose 'new' when genuinely distinct AND aligned with the user's interests; 'drop' when "
             "incidental or not aligned. Merge near-synonyms; keep genuinely distinct relations separate "
-            "(e.g. Funds vs Sponsors)."
+            "(e.g. Funds vs Sponsors). Name a new type in sentence case — capitalize only the first "
+            "word (e.g. 'Located in', 'Works at'), never UPPER_CASE or with underscores."
         )
     system = (
         f"You maintain a controlled vocabulary of {kind} types for a knowledge graph.\n"

@@ -20,7 +20,7 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
-from sqlalchemy.sql.expression import false
+from sqlalchemy.sql.expression import false, true
 
 
 class Base(DeclarativeBase):
@@ -101,8 +101,10 @@ class KnowledgeBaseConfig(_BaseModel):
     __table_args__ = (UniqueConstraint("knowledge_base_id"),)
     knowledge_base_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), nullable=False)
     knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref=backref("config", uselist=False))
-    relevance_prompt: Mapped[str] = mapped_column(TEXT, nullable=False)
+    interests: Mapped[str] = mapped_column(TEXT, nullable=False)
+    discover_types: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, server_default=true())
     # Each type is {"name": str, "description": str}; the description guides the extractor.
+    # entity_types / relationship_types unchanged (JSONB list of {name, description, pinned?, banned?})
     entity_types: Mapped[list[dict[str, str]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

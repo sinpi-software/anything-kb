@@ -123,6 +123,16 @@ def test_build_extraction_messages_bars_vague_phrase_entities(discover: bool) ->
     assert "descriptive phrases" in joined
 
 
+@pytest.mark.parametrize("discover", [True, False])
+def test_build_extraction_messages_pushes_relationship_completeness(discover: bool) -> None:
+    msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
+    joined = " ".join(m["content"] for m in msgs).lower()
+    # Both modes must push the model to connect the entities it extracts and to
+    # keep relationship endpoints matching entity names (nano under-emits edges).
+    assert "connect the actors" in joined
+    assert "name of an entity in your entities list" in joined
+
+
 def test_normalize_name() -> None:
     assert normalize_name("  Barack   Obama ") == "barack obama"
 

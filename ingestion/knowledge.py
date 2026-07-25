@@ -82,6 +82,15 @@ _ENTITY_QUALITY = (
     "into the relevant entity's description rather than creating a node for it."
 )
 
+# Nano reliably extracts entities but under-emits the relationships tying them together,
+# leaving durable nodes stranded. This pushes it to connect the actors it names.
+_RELATIONSHIP_COMPLETENESS = (
+    "Connect the actors: emit every relationship the text supports, so that each entity you extract "
+    "takes part in at least one relationship wherever the text warrants it — do not leave the story's "
+    "people, organizations, and works stranded. Each relationship's source and target MUST be written "
+    "exactly as the name of an entity in your entities list (same spelling)."
+)
+
 
 def build_extraction_messages(
     entity_types: list[dict[str, str]],
@@ -105,7 +114,8 @@ def build_extraction_messages(
             "individually-referenceable things (people, organizations, places, works, events) — never "
             "for time windows, durations, dates, quantities, measurements, or descriptive attributes.\n\n"
             f"{_ENTITY_QUALITY}\n\n"
-            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label)."
+            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
+            f"{_RELATIONSHIP_COMPLETENESS}"
         )
     else:
         system = (
@@ -114,7 +124,8 @@ def build_extraction_messages(
             f"{_ENTITY_QUALITY}\n\n"
             "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
             f"Also extract relationships, using only these relationship types:\n{_render_types(relationship_types)}\n\n"
-            "Use the exact type names given; do not invent new ones."
+            "Use the exact type names given; do not invent new ones.\n\n"
+            f"{_RELATIONSHIP_COMPLETENESS}"
         )
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 

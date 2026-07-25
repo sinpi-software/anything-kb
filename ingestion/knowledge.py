@@ -86,14 +86,15 @@ _ENTITY_QUALITY = (
 # entities to the broader places/organizations that recur across stories — so the graph
 # splinters into one island per document. This pushes for both local links and shared anchors.
 _RELATIONSHIP_COMPLETENESS = (
-    "Connect and anchor every entity. Emit each relationship the text supports so no entity is left "
-    "unconnected, and tie each entity to the broader context that situates it: a venue or landmark to "
-    "its city, a person to their organization, an event to where and by whom it happens. Build the "
-    "geographic backbone: place every town, city, and locale within the COUNTY and STATE that contains "
-    "it (name the county and state explicitly, from your own knowledge if the text omits them, and use "
-    "the exact same name every time — e.g. both Longview and Kelso resolve to 'Cowlitz County', "
-    "'Washington'). Because separate stories reuse these same county and state anchors, the graph "
-    "connects into one whole instead of splintering into an isolated cluster per story. Each "
+    "Connect and anchor every entity so the graph forms one connected whole, not one island per story. "
+    "Emit each relationship the text supports, and tie every entity to the broader context that "
+    "situates it (a venue to its city, a person to their organization, an event to where it happens). "
+    "Build a geographic backbone from SEPARATE, linked nodes: for each town or city, create distinct "
+    "entities for the town, its county, and its state (from your own knowledge if the text omits them) "
+    "and link them with 'Located in' relationships — e.g. 'Kelso' -> 'Cowlitz County' -> 'Washington' "
+    "as three separate entities. NEVER fold the hierarchy into one compound name like "
+    "'Kelso, Cowlitz County, Washington'; keep the bare county and state as their own nodes, named "
+    "identically every time, so every town in a county links to the same shared county node. Each "
     "relationship's source and target MUST be written exactly as the name of an entity in your "
     "entities list (same spelling)."
 )

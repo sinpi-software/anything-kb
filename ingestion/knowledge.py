@@ -405,6 +405,7 @@ def consolidate_types(
     vocab: list[dict[str, Any]],
     interests: str,
     llm_params: dict[str, Any],
+    examples: dict[str, str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Resolve novel candidate type names to existing/new/drop against the current vocabulary."""
     if not candidates:
@@ -413,17 +414,31 @@ def consolidate_types(
         f"- {t['name']}{' (pinned/authoritative)' if t.get('pinned') else ''}: {t.get('description') or ''}"
         for t in vocab
     )
+    if kind == "entity":
+        criterion = (
+            "Choose 'new' ONLY if each instance of the type would merit its own standalone wiki "
+            "page — a durable, individually-notable subject (a person, organization, place, work, "
+            "law, lasting event). Choose 'drop' when instances are passing details, circumstances, "
+            "measurements, time windows, or attributes of some other subject rather than subjects in "
+            "their own right — even if topically relevant. Merge near-synonyms onto an existing type."
+        )
+    else:
+        criterion = (
+            "Choose 'new' when genuinely distinct AND aligned with the user's interests; 'drop' when "
+            "incidental or not aligned. Merge near-synonyms; keep genuinely distinct relations separate "
+            "(e.g. Funds vs Sponsors)."
+        )
     system = (
         f"You maintain a controlled vocabulary of {kind} types for a knowledge graph.\n"
         f"The user cares about: {interests}\n\n"
         f"Existing {kind} types (reuse the exact name when a candidate means the same thing; "
         f"pinned types are authoritative and must not be renamed):\n{vocab_lines or '(none yet)'}\n\n"
         "For each candidate below decide: 'existing' (a synonym of an existing type — give its exact "
-        "canonical name), 'new' (genuinely distinct AND aligned with the user's interests — give a clean "
-        "name and a one-line description), or 'drop' (incidental or not aligned). Merge near-synonyms; "
-        "keep genuinely distinct relations separate (e.g. Funds vs Sponsors)."
+        "canonical name), 'new' (give a clean name and a one-line description), or 'drop'.\n"
+        f"{criterion}"
     )
-    user = "Candidates:\n" + "\n".join(f"- {c}" for c in candidates)
+    ex = examples or {}
+    user = "Candidates:\n" + "\n".join(f"- {c}" + (f' (e.g. "{ex[c]}")' if c in ex else "") for c in candidates)
     schema = {
         "type": "json_schema",
         "json_schema": {

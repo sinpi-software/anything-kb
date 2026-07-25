@@ -333,6 +333,59 @@ def test_consolidate_types_maps_synonym_and_mints_new(monkeypatch: pytest.Monkey
     assert out[knowledge_mod._norm_type("mentioned")]["decision"] == "drop"
 
 
+def test_consolidate_types_entity_uses_wiki_criterion_and_renders_example(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_chat(client: Any, model: str, messages: list[dict[str, str]], llm_params: Any, schema: Any) -> str:
+        captured["messages"] = messages
+        return TypeConsolidation(decisions=[TypeDecision(candidate="TimeWindow", decision="drop")]).model_dump_json()
+
+    monkeypatch.setattr(knowledge_mod, "_chat", fake_chat)
+    out = knowledge_mod.consolidate_types(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        kind="entity",
+        candidates=["TimeWindow"],
+        vocab=[],
+        interests="local news",
+        llm_params={},
+        examples={"TimeWindow": "7:00 a.m.-3:30 p.m."},
+    )
+    system = captured["messages"][0]["content"]
+    user = captured["messages"][1]["content"]
+    assert "wiki page" in system
+    assert "7:00 a.m.-3:30 p.m." in user  # example instance rendered next to the candidate
+    assert out[knowledge_mod._norm_type("TimeWindow")]["decision"] == "drop"
+
+
+def test_consolidate_types_relationship_keeps_distinctness_criterion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_chat(client: Any, model: str, messages: list[dict[str, str]], llm_params: Any, schema: Any) -> str:
+        captured["messages"] = messages
+        return TypeConsolidation(
+            decisions=[TypeDecision(candidate="backed", decision="existing", canonical="Sponsors")]
+        ).model_dump_json()
+
+    monkeypatch.setattr(knowledge_mod, "_chat", fake_chat)
+    knowledge_mod.consolidate_types(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        kind="relationship",
+        candidates=["backed"],
+        vocab=[{"name": "Sponsors", "description": ""}],
+        interests="civic",
+        llm_params={},
+    )
+    system = captured["messages"][0]["content"]
+    assert "Funds vs Sponsors" in system  # existing distinctness guidance retained
+    assert "wiki page" not in system  # durability test is entity-only
+
+
 def _cleanup(knowledge_base_id: str) -> None:
     with get_neo4j_session() as session:
         session.run(

@@ -533,3 +533,67 @@ def test_merge_content_normalizes_type_casing_and_stores_configured_name(monkeyp
     finally:
         with get_neo4j_session() as neo:
             neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_new_type_colliding_with_existing_canon_uses_canonical_casing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """consolidate_types can mint a "new" type whose name normalizes to a type already in canon
+    (e.g. a differently-cased duplicate). The stored type must be the existing canonical name,
+    never the raw minted name, and no duplicate entry should be added to new_entity_types."""
+    bootstrap_schema()
+    extraction = KnowledgeExtraction(
+        entities=[
+            # "Human" is unmatched against the configured "Person" type, so it goes through
+            # consolidate_types rather than the fast path.
+            ExtractedEntity(name="Alice", type="Human", description="d"),
+        ],
+        relationships=[],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
+    monkeypatch.setattr(
+        knowledge_mod,
+        "consolidate_types",
+        lambda *a, **k: {
+            # Mints "PERSON", which normalizes the same as the already-configured "Person".
+            knowledge_mod._norm_type("Human"): {
+                "decision": "new",
+                "name": "PERSON",
+                "description": "a human being",
+            }
+        },
+    )
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            "Alice is a human.",
+            [{"name": "Person", "description": ""}],
+            [],
+            job_id,
+            discover=True,
+        )
+        assert result.entities_created == 1
+        assert result.new_entity_types == []  # no duplicate "PERSON" type appended
+        with get_neo4j_session() as neo:
+            entity_type = neo.run(
+                "MATCH (e:Entity {knowledge_base_id: $o, name: 'Alice'}) RETURN e.type AS t", {"o": knowledge_base_id}
+            ).single(True)
+            assert entity_type["t"] == "Person"  # canonical stored casing, not the raw minted "PERSON"
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})

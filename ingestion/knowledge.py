@@ -461,7 +461,7 @@ def merge_content(
                     if _norm_type(name) not in canon:
                         canon[_norm_type(name)] = name
                         new_out.append({"name": name, "description": d.get("description", "")})
-                    return name
+                    return canon[_norm_type(name)]
                 return None
 
             return resolve

@@ -83,17 +83,18 @@ export default function Config({ loaderData }: Route.ComponentProps) {
         </p>
         <h1 className="mt-3.5 text-3xl font-semibold tracking-tight">Tune your knowledge base.</h1>
         <p className="mt-1 text-muted">
-          The relevance prompt decides what gets in; the types decide what the graph captures. Changes
-          apply to content ingested afterward.
+          What you care about decides both what gets in and what the extractor focuses on; the types
+          decide what the graph captures. Changes apply to content ingested afterward.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-6">
           {disabled ? <VerifyEmailBanner message="Verify your email to edit configuration." /> : null}
 
           <Card>
-            <CardTitle className="text-lg">Relevance filter</CardTitle>
+            <CardTitle className="text-lg">Relevance &amp; focus</CardTitle>
             <CardDescription>
-              A plain-language question. Content that doesn't match is skipped, never stored.
+              A plain-language description of your interests. Content that doesn't match is skipped,
+              never stored — and content that does match is extracted through this lens.
             </CardDescription>
             <Field className="mt-5">
               <FieldLabel>What I care about</FieldLabel>

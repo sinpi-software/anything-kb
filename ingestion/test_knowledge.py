@@ -127,9 +127,10 @@ def test_build_extraction_messages_bars_vague_phrase_entities(discover: bool) ->
 def test_build_extraction_messages_pushes_relationship_completeness(discover: bool) -> None:
     msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
     joined = " ".join(m["content"] for m in msgs).lower()
-    # Both modes must push the model to connect the entities it extracts and to
-    # keep relationship endpoints matching entity names (nano under-emits edges).
-    assert "connect the actors" in joined
+    # Both modes must push the model to connect + anchor the entities it extracts
+    # (to shared places/orgs so the graph coheres) and keep endpoints matching entity names.
+    assert "connect and anchor" in joined
+    assert "shared anchors" in joined
     assert "name of an entity in your entities list" in joined
 
 

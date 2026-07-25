@@ -82,13 +82,18 @@ _ENTITY_QUALITY = (
     "into the relevant entity's description rather than creating a node for it."
 )
 
-# Nano reliably extracts entities but under-emits the relationships tying them together,
-# leaving durable nodes stranded. This pushes it to connect the actors it names.
+# Nano under-emits relationships (leaving nodes stranded) AND fails to anchor each story's
+# entities to the broader places/organizations that recur across stories — so the graph
+# splinters into one island per document. This pushes for both local links and shared anchors.
 _RELATIONSHIP_COMPLETENESS = (
-    "Connect the actors: emit every relationship the text supports, so that each entity you extract "
-    "takes part in at least one relationship wherever the text warrants it — do not leave the story's "
-    "people, organizations, and works stranded. Each relationship's source and target MUST be written "
-    "exactly as the name of an entity in your entities list (same spelling)."
+    "Connect and anchor every entity. Emit each relationship the text supports so no entity is left "
+    "unconnected, and in particular tie each entity to the broader context that situates it: a venue "
+    "or landmark to its city, a person to their organization, an event to where and by whom it "
+    "happens, a local matter to its county or region. Favor linking to the places, organizations, and "
+    "governing bodies that recur across stories (cities, the county, the region, agencies), so the "
+    "graph connects through shared anchors instead of splintering into isolated clusters. Each "
+    "relationship's source and target MUST be written exactly as the name of an entity in your "
+    "entities list (same spelling)."
 )
 
 

@@ -1,3 +1,7 @@
+import http.client
+import io
+import urllib.request
+
 import pytest
 
 import net_guard
@@ -52,3 +56,43 @@ def test_blocks_when_any_dns_answer_is_private(monkeypatch: pytest.MonkeyPatch) 
     )
     with pytest.raises(net_guard.BlockedURLError):
         net_guard.assert_public_url("https://sneaky.example.com/feed.xml")
+
+
+def test_redirect_handler_blocks_redirect_hop_to_private_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard must re-run on the redirect target, not just the initial URL — a
+    public URL must not be able to bounce the fetch to an internal address."""
+
+    def fake_getaddrinfo(
+        host: str, port: int | None, **kwargs: object
+    ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        table = {"example.com": "93.184.216.34", "169.254.169.254": "169.254.169.254"}
+        return [(2, 1, 6, "", (table[host], port or 80))]
+
+    monkeypatch.setattr(net_guard.socket, "getaddrinfo", fake_getaddrinfo)
+    handler = net_guard._GuardedRedirectHandler()
+    req = urllib.request.Request("https://example.com/feed.xml")
+    headers = http.client.HTTPMessage()
+    with pytest.raises(net_guard.BlockedURLError):
+        handler.redirect_request(
+            req, io.BytesIO(b""), 302, "Found", headers, "http://169.254.169.254/latest/meta-data/"
+        )
+
+
+def test_redirect_handler_allows_redirect_hop_to_public_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A redirect to another public address is let through — the guard discriminates
+    rather than blocking every redirect."""
+
+    def fake_getaddrinfo(
+        host: str, port: int | None, **kwargs: object
+    ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        table = {"example.com": "93.184.216.34", "cdn.example.com": "93.184.216.35"}
+        return [(2, 1, 6, "", (table[host], port or 80))]
+
+    monkeypatch.setattr(net_guard.socket, "getaddrinfo", fake_getaddrinfo)
+    handler = net_guard._GuardedRedirectHandler()
+    req = urllib.request.Request("https://example.com/feed.xml")
+    headers = http.client.HTTPMessage()
+    newurl = "https://cdn.example.com/feed.xml"
+    result = handler.redirect_request(req, io.BytesIO(b""), 302, "Found", headers, newurl)
+    assert result is not None
+    assert result.full_url == newurl

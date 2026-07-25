@@ -73,6 +73,16 @@ def _render_types(types: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+# Keeps vague noun-phrases (e.g. "a two-year legal battle") out of the graph as their own nodes.
+_ENTITY_QUALITY = (
+    "Only extract entities that are concrete, specific, and individually significant — a distinct, "
+    "named person, organization, place, product, work, law, or named event. Do NOT extract vague "
+    "descriptive phrases (e.g. 'a two-year legal battle'), durations, quantities, dates, generic "
+    "concepts, or a phrase that merely restates or is a fragment of another entity — fold such detail "
+    "into the relevant entity's description rather than creating a node for it."
+)
+
+
 def build_extraction_messages(
     entity_types: list[dict[str, str]],
     relationship_types: list[dict[str, str]],
@@ -91,13 +101,15 @@ def build_extraction_messages(
             f"Relationship types:\n{_render_types(relationship_types)}\n\n"
             "When you find something genuinely new that matches the user's interests and no existing "
             "type fits, coin a concise new type name and use it. Do not force-fit and do not create "
-            "types for incidental mentions.\n"
+            "types for incidental mentions.\n\n"
+            f"{_ENTITY_QUALITY}\n\n"
             "For each entity, write a thorough, self-contained description (a rich paragraph, not a label)."
         )
     else:
         system = (
             f"{lens}"
             f"Extract only entities of these types:\n{_render_types(entity_types)}\n\n"
+            f"{_ENTITY_QUALITY}\n\n"
             "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
             f"Also extract relationships, using only these relationship types:\n{_render_types(relationship_types)}\n\n"
             "Use the exact type names given; do not invent new ones."

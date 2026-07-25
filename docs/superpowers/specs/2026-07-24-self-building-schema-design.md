@@ -92,7 +92,7 @@ Cookie route (`routes_settings.py`) and Bearer route (`routes_config.py`) both u
 
 ## Error handling
 
-- Consolidation LLM failure ⇒ the job fails and retries (consistent with relevance/extraction failures — never silently drop content). On repeated failure, fall back to the fast path only (known types kept, novel candidates deferred, job marked done) rather than losing the whole document — **decision to confirm in review.**
+- Consolidation LLM failure ⇒ retry the consolidation call; on repeated failure, **fall back to the fast path only** — known (already-canonical) types are kept and written, novel candidates are deferred (dropped this run), and the job is marked done rather than losing the whole document. (Confirmed.)
 - A candidate that the LLM maps to a non-existent canonical name ⇒ treated as `new`.
 - Vocabulary write contention ⇒ resolved by the normalized-dedup append (§4).
 
@@ -114,8 +114,8 @@ One Alembic migration: rename `relevance_prompt`→`interests`, add `discover_ty
 - UI **merge** with graph-edge repointing (deferred; consolidation prevents most duplicates at write time).
 - Auto-undo of bad merges (v1 gives a visible audit list only).
 
-## Open questions for review
+## Resolved decisions
 
-1. **Error fallback (§ Error handling):** on repeated consolidation-LLM failure, fall back to fast-path-only (keep known types, defer novel, mark done) vs. fail the whole job? Proposed: fast-path fallback.
-2. **Discover default for existing KBs:** proposed **on** (you asked for this) — confirm you don't want it off-by-default with an opt-in.
-3. **Ban semantics:** proposed that banning also deletes existing edges/nodes of that type, or only blocklists future ones? Proposed: **blocklist future only**, leave existing data (least destructive).
+1. **Consolidation-LLM failure ⇒ fast-path fallback:** keep known types, defer novel candidates, mark the job done. Never fail the whole document over consolidation.
+2. **`discover_types` defaults on**, including for the existing KB.
+3. **Ban = blocklist future only.** Banning a type prevents it from being (re)added and drops future facts that resolve to it; existing nodes/edges of that type are left untouched.

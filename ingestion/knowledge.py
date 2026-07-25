@@ -73,18 +73,34 @@ def _render_types(types: list[dict[str, str]]) -> str:
 
 
 def build_extraction_messages(
-    entity_types: list[dict[str, str]], relationship_types: list[dict[str, str]], text: str
+    entity_types: list[dict[str, str]],
+    relationship_types: list[dict[str, str]],
+    text: str,
+    *,
+    interests: str,
+    discover: bool,
 ) -> list[dict[str, str]]:
-    system = (
-        "Extract only entities of these types (use the exact names; the description explains what "
-        "each type means):\n"
-        f"{_render_types(entity_types)}\n\n"
-        "For each entity, write a thorough, self-contained description capturing everything this "
-        "article says about it (who/what it is, key facts, context) — a rich paragraph, not a label.\n\n"
-        "Also extract relationships between them, using only these relationship types:\n"
-        f"{_render_types(relationship_types)}\n\n"
-        "Use the exact type names given; do not invent new ones."
-    )
+    lens = f"The user cares about: {interests}\n\n" if interests.strip() else ""
+    if discover:
+        system = (
+            f"{lens}"
+            "Extract entities and relationships that match the user's interests.\n"
+            "Vocabulary discovered so far — reuse these exact names when a fact fits one:\n"
+            f"Entity types:\n{_render_types(entity_types)}\n"
+            f"Relationship types:\n{_render_types(relationship_types)}\n\n"
+            "When you find something genuinely new that matches the user's interests and no existing "
+            "type fits, coin a concise new type name and use it. Do not force-fit and do not create "
+            "types for incidental mentions.\n"
+            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label)."
+        )
+    else:
+        system = (
+            f"{lens}"
+            f"Extract only entities of these types:\n{_render_types(entity_types)}\n\n"
+            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
+            f"Also extract relationships, using only these relationship types:\n{_render_types(relationship_types)}\n\n"
+            "Use the exact type names given; do not invent new ones."
+        )
     return [{"role": "system", "content": system}, {"role": "user", "content": text}]
 
 
@@ -111,6 +127,8 @@ def extract_knowledge(
     relationship_types: list[dict[str, str]],
     text: str,
     llm_params: dict[str, Any],
+    interests: str = "",
+    discover: bool = False,
 ) -> KnowledgeExtraction:
     schema = {
         "type": "json_schema",
@@ -120,7 +138,7 @@ def extract_knowledge(
             "schema": _strict_schema(KnowledgeExtraction.model_json_schema()),
         },
     }
-    messages = build_extraction_messages(entity_types, relationship_types, text)
+    messages = build_extraction_messages(entity_types, relationship_types, text, interests=interests, discover=discover)
     content = _chat(client, model, messages, llm_params, schema)
     if content is None:
         raise ValueError("LLM returned no text content")

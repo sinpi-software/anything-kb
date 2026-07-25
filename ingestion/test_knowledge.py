@@ -87,20 +87,24 @@ def test_extraction_defaults_aliases_empty() -> None:
     assert e.aliases == []
 
 
-def test_build_extraction_messages_includes_entity_and_relationship_types() -> None:
+def test_build_extraction_messages_open_mode_includes_interests_and_invites_new_types() -> None:
     msgs = build_extraction_messages(
-        [{"name": "Person", "description": "a named human"}, {"name": "Place", "description": ""}],
-        [{"name": "KNOWS", "description": ""}, {"name": "BORN_IN", "description": "birthplace of a person"}],
+        [{"name": "Person", "description": "a named human"}],
+        [{"name": "Affected by", "description": ""}],
         "Some article",
+        interests="US civic politics",
+        discover=True,
     )
     joined = " ".join(m["content"] for m in msgs)
-    assert "Person" in joined and "Place" in joined
-    assert "KNOWS" in joined and "BORN_IN" in joined
-    # type descriptions are rendered into the prompt
-    assert "a named human" in joined and "birthplace of a person" in joined
-    assert "Some article" in joined
-    assert msgs[0]["role"] == "system"
-    assert msgs[-1]["role"] == "user"
+    assert "US civic politics" in joined
+    assert "Person" in joined and "a named human" in joined
+    assert "new" in joined.lower()  # invites coining new types
+
+
+def test_build_extraction_messages_guided_mode_forbids_new_types() -> None:
+    msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=False)
+    joined = " ".join(m["content"] for m in msgs).lower()
+    assert "do not invent" in joined
 
 
 def test_normalize_name() -> None:

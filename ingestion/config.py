@@ -2,8 +2,10 @@
 
 # --- LLM (OpenRouter) ---
 OPENROUTER_API_KEY_ENV = "INGESTION_OPENROUTER_API_KEY"
-# Default model for relevance judging and knowledge extraction.
-LLM_MODEL = "openai/gpt-5-nano"
+# Default model for relevance judging and knowledge extraction. gpt-5-nano was too
+# weak to follow the extraction salience guardrails (kept coining TimeWindow/fragment
+# types despite explicit instruction not to); mini follows the negative instructions.
+LLM_MODEL = "openai/gpt-5-mini"
 # Per-request timeout. Without it a stuck reasoning model hangs the worker forever.
 LLM_TIMEOUT_MS = 90_000
 # Max concurrent OpenRouter calls, enforced by a threading.Semaphore in knowledge._chat.

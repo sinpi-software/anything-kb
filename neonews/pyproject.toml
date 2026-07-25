@@ -1,0 +1,52 @@
+[project]
+name = "neonews"
+version = "0.1.0"
+description = "Automated newsroom over the knowledge-graph engine"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.5",
+    "dotenv>=0.9.9",
+    "feedparser>=6.0.11",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.4",
+    "openrouter>=0.10.8",
+    "prefect>=3.7.0",
+    "psycopg2-binary>=2.9.12",
+    "pydantic>=2.13.4",
+    "sqlalchemy>=2.0.51",
+    "trafilatura>=1.12.0",
+    "certifi>=2024.8.30",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3.0", "mypy>=1.13.0", "ruff>=0.8.0"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cluster", "config", "db", "draft", "engine", "ingest", "jobs", "models", "net_guard", "poll", "serve", "sources", "write"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["alembic/versions/", "\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["feedparser.*", "trafilatura.*", "prefect.*"]
+ignore_missing_imports = true
+
+[tool.alembic]
+
+# path to migration scripts.
+script_location = "%(here)s/alembic"
+
+# additional paths to be prepended to sys.path. defaults to the current working directory.
+prepend_sys_path = [
+    "."
+]

@@ -21,6 +21,8 @@ from knowledge import (  # noqa: E402
     ExtractedRelationship,
     KnowledgeExtraction,
     MergeResult,
+    TypeConsolidation,
+    TypeDecision,
     build_extraction_messages,
     candidate_query,
     escape_lucene,
@@ -231,6 +233,29 @@ def test_resolve_batch_no_candidates_skips_llm() -> None:
     client = _FakeResolutionClient("unused")
     assert _resolve_batch(session, client) == [None]
     assert not client.chat.send_called
+
+
+def test_consolidate_types_maps_synonym_and_mints_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = TypeConsolidation(
+        decisions=[
+            TypeDecision(candidate="backed", decision="existing", canonical="Sponsors"),
+            TypeDecision(candidate="Endorses", decision="new", name="Endorses", description="publicly endorses"),
+            TypeDecision(candidate="mentioned", decision="drop"),
+        ]
+    ).model_dump_json()
+    monkeypatch.setattr(knowledge_mod, "_chat", lambda *a, **k: payload)
+    out = knowledge_mod.consolidate_types(
+        client=None,  # type: ignore[arg-type]  # consolidate_types forwards client to a monkeypatched _chat
+        model="m",
+        kind="relationship",
+        candidates=["backed", "Endorses", "mentioned"],
+        vocab=[{"name": "Sponsors", "description": "introduces legislation", "pinned": True}],
+        interests="civic",
+        llm_params={},
+    )
+    assert out[knowledge_mod._norm_type("backed")]["canonical"] == "Sponsors"
+    assert out[knowledge_mod._norm_type("Endorses")]["name"] == "Endorses"
+    assert out[knowledge_mod._norm_type("mentioned")]["decision"] == "drop"
 
 
 def _cleanup(knowledge_base_id: str) -> None:

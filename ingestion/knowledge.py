@@ -331,6 +331,62 @@ def _norm_type(name: str) -> str:
     return "".join(ch for ch in name.upper() if ch.isalnum())
 
 
+class TypeDecision(BaseModel):
+    candidate: str
+    decision: str  # "existing" | "new" | "drop"
+    canonical: str = ""  # set when decision == "existing"
+    name: str = ""  # cleaned name when decision == "new"
+    description: str = ""  # one-line description when decision == "new"
+
+
+class TypeConsolidation(BaseModel):
+    decisions: list[TypeDecision] = []
+
+
+def consolidate_types(
+    client: OpenRouter,
+    model: str,
+    kind: str,
+    candidates: list[str],
+    vocab: list[dict[str, Any]],
+    interests: str,
+    llm_params: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    """Resolve novel candidate type names to existing/new/drop against the current vocabulary."""
+    if not candidates:
+        return {}
+    vocab_lines = "\n".join(
+        f"- {t['name']}{' (pinned/authoritative)' if t.get('pinned') else ''}: {t.get('description') or ''}"
+        for t in vocab
+    )
+    system = (
+        f"You maintain a controlled vocabulary of {kind} types for a knowledge graph.\n"
+        f"The user cares about: {interests}\n\n"
+        f"Existing {kind} types (reuse the exact name when a candidate means the same thing; "
+        f"pinned types are authoritative and must not be renamed):\n{vocab_lines or '(none yet)'}\n\n"
+        "For each candidate below decide: 'existing' (a synonym of an existing type — give its exact "
+        "canonical name), 'new' (genuinely distinct AND aligned with the user's interests — give a clean "
+        "name and a one-line description), or 'drop' (incidental or not aligned). Merge near-synonyms; "
+        "keep genuinely distinct relations separate (e.g. Funds vs Sponsors)."
+    )
+    user = "Candidates:\n" + "\n".join(f"- {c}" for c in candidates)
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "type_consolidation",
+            "strict": True,
+            "schema": _strict_schema(TypeConsolidation.model_json_schema()),
+        },
+    }
+    out = _chat(
+        client, model, [{"role": "system", "content": system}, {"role": "user", "content": user}], llm_params, schema
+    )
+    if out is None:
+        raise ValueError("type consolidation returned no content")
+    result = TypeConsolidation.model_validate_json(out)
+    return {_norm_type(d.candidate): d.model_dump(exclude={"candidate"}) for d in result.decisions}
+
+
 def merge_content(
     knowledge_base_id: str,
     content: str,

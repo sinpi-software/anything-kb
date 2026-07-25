@@ -32,7 +32,8 @@ export default function Config({ loaderData }: Route.ComponentProps) {
   const { me, config } = loaderData;
   const navigate = useNavigate();
 
-  const [prompt, setPrompt] = useState(config.relevance_prompt);
+  const [interests, setInterests] = useState(config.interests);
+  const [discoverTypes, setDiscoverTypes] = useState(config.discover_types);
   const [entities, setEntities] = useState(config.entity_types);
   const [relationships, setRelationships] = useState(config.relationship_types);
   const [save, setSave] = useState<Save>({ kind: "idle" });
@@ -46,11 +47,13 @@ export default function Config({ loaderData }: Route.ComponentProps) {
     setSave({ kind: "saving" });
     try {
       const next = await updateConfig({
-        relevance_prompt: prompt,
+        interests,
+        discover_types: discoverTypes,
         entity_types: entities,
         relationship_types: relationships,
       });
-      setPrompt(next.relevance_prompt);
+      setInterests(next.interests);
+      setDiscoverTypes(next.discover_types);
       setEntities(next.entity_types);
       setRelationships(next.relationship_types);
       setSave({ kind: "saved" });
@@ -93,14 +96,15 @@ export default function Config({ loaderData }: Route.ComponentProps) {
               A plain-language question. Content that doesn't match is skipped, never stored.
             </CardDescription>
             <Field className="mt-5">
-              <FieldLabel>Relevance prompt</FieldLabel>
+              <FieldLabel>What I care about</FieldLabel>
               <Textarea
                 rows={3}
                 placeholder="e.g. Is this about technology, science, or business news?"
                 disabled={disabled}
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
+                value={interests}
+                onChange={(event) => setInterests(event.target.value)}
               />
+              <p className="text-xs text-muted">Decides what gets in and what's worth extracting.</p>
             </Field>
           </Card>
 
@@ -110,6 +114,16 @@ export default function Config({ loaderData }: Route.ComponentProps) {
               The entity and relationship types the extractor may create. Give each a description —
               it's fed to the model so it knows what the type means in your domain.
             </CardDescription>
+            <label className="mt-5 flex flex-wrap items-center gap-2.5 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={discoverTypes}
+                disabled={disabled}
+                onChange={(event) => setDiscoverTypes(event.target.checked)}
+                className="size-4 rounded border-line-strong accent-accent-fill disabled:opacity-50"
+              />
+              Automatically discover new types
+            </label>
             <div className="mt-5 flex flex-col gap-6">
               <Field>
                 <FieldLabel>Entity types</FieldLabel>

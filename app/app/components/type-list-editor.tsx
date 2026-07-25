@@ -1,7 +1,8 @@
-import { Plus, X } from "lucide-react";
+import { Ban, Pin, Plus, X } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { cn } from "~/lib/utils";
 import type { TypeDef } from "~/lib/types";
 
 interface TypeListEditorProps {
@@ -30,10 +31,14 @@ export function TypeListEditor({
       {values.map((value, index) => (
         <div
           key={index}
-          className="flex flex-col gap-2 rounded-lg border border-line-strong bg-surface p-2.5 sm:flex-row sm:items-center"
+          className={cn(
+            "flex flex-col gap-2 rounded-lg border border-line-strong bg-surface p-2.5 sm:flex-row sm:items-center",
+            value.pinned && "border-accent-fill",
+            value.banned && "opacity-60",
+          )}
         >
           <Input
-            className="font-display sm:w-44 sm:flex-none"
+            className={cn("font-display sm:w-44 sm:flex-none", value.banned && "line-through")}
             placeholder={namePlaceholder ?? "TYPE_NAME"}
             disabled={disabled}
             value={value.name}
@@ -46,21 +51,49 @@ export function TypeListEditor({
             value={value.description}
             onValueChange={(description) => update(index, { description })}
           />
-          <button
-            type="button"
-            onClick={() => onChange(values.filter((_, i) => i !== index))}
-            disabled={disabled}
-            aria-label={`Remove ${value.name || "type"}`}
-            className="self-end text-muted hover:text-ink disabled:opacity-50 sm:self-center"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-1 self-end sm:self-center">
+            <button
+              type="button"
+              onClick={() => update(index, { pinned: !value.pinned })}
+              disabled={disabled}
+              aria-label={value.pinned ? `Unpin ${value.name || "type"}` : `Pin ${value.name || "type"}`}
+              aria-pressed={value.pinned}
+              className={cn(
+                "rounded-md p-1.5 text-muted hover:text-ink disabled:opacity-50",
+                value.pinned && "text-accent hover:text-accent",
+              )}
+            >
+              <Pin className="size-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => update(index, { banned: !value.banned })}
+              disabled={disabled}
+              aria-label={value.banned ? `Unban ${value.name || "type"}` : `Ban ${value.name || "type"}`}
+              aria-pressed={value.banned}
+              className={cn(
+                "rounded-md p-1.5 text-muted hover:text-ink disabled:opacity-50",
+                value.banned && "text-[#c0392b] hover:text-[#c0392b] dark:text-[#e39ba3] dark:hover:text-[#e39ba3]",
+              )}
+            >
+              <Ban className="size-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((_, i) => i !== index))}
+              disabled={disabled}
+              aria-label={`Remove ${value.name || "type"}`}
+              className="rounded-md p-1.5 text-muted hover:text-ink disabled:opacity-50"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       ))}
       <Button
         type="button"
         variant="outline"
-        onClick={() => onChange([...values, { name: "", description: "" }])}
+        onClick={() => onChange([...values, { name: "", description: "", pinned: false, banned: false }])}
         disabled={disabled}
         className="self-start text-sm"
       >

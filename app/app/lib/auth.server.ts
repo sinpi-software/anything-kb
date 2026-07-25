@@ -5,7 +5,12 @@
 // cookie directly from the same-origin browser response.
 import type { ApiKey, KbConfig, Me } from "./types";
 
-const EMPTY_CONFIG: KbConfig = { relevance_prompt: "", entity_types: [], relationship_types: [] };
+const EMPTY_CONFIG: KbConfig = {
+  interests: "",
+  discover_types: true,
+  entity_types: [],
+  relationship_types: [],
+};
 
 const INTERNAL_API_URL =
   process.env.INTERNAL_API_URL ?? "http://ingestion-api.ingestion.svc.cluster.local:80";

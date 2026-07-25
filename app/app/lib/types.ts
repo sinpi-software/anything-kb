@@ -7,10 +7,13 @@ export interface KnowledgeBaseMembership {
 export interface TypeDef {
   name: string;
   description: string;
+  pinned: boolean;
+  banned: boolean;
 }
 
 export interface KbConfig {
-  relevance_prompt: string;
+  interests: string;
+  discover_types: boolean;
   entity_types: TypeDef[];
   relationship_types: TypeDef[];
 }

@@ -3,7 +3,7 @@
 // Cookie header to the in-cluster backend by hand. Never forwards
 // Set-Cookie back — mutations are client-side (see lib/api.ts) and set the
 // cookie directly from the same-origin browser response.
-import type { ApiKey, KbConfig, Me } from "./types";
+import type { ApiKey, EntityPage, KbConfig, Me } from "./types";
 
 const EMPTY_CONFIG: KbConfig = {
   interests: "",
@@ -54,5 +54,23 @@ export async function getConfig(request: Request): Promise<KbConfig> {
     return await res.json();
   } catch {
     return EMPTY_CONFIG;
+  }
+}
+
+export async function getEntity(request: Request, id: string): Promise<EntityPage | null> {
+  const query =
+    "query($id: ID!) { node(id: $id) { id name type summary article " +
+    "edges { type target { id name type } } references { label date } } }";
+  try {
+    const res = await fetch(`${INTERNAL_API_URL}/api/graphql`, {
+      method: "POST",
+      headers: { ...forwardCookie(request), "content-type": "application/json" },
+      body: JSON.stringify({ query, variables: { id } }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body?.data?.node ?? null;
+  } catch {
+    return null;
   }
 }

@@ -42,3 +42,13 @@ export interface CreatedApiKey {
   prefix: string;
   key: string;
 }
+
+export interface EntityPage {
+  id: string;
+  name: string;
+  type: string;
+  summary: string | null;
+  article: string | null;
+  edges: { type: string; target: { id: string; name: string; type: string } }[];
+  references: { label: string; date: string }[];
+}

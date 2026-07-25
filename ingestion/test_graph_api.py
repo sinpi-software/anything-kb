@@ -75,11 +75,11 @@ def seeded():  # type: ignore[no-untyped-def]
             "Engine article",
         )
         write_relationship(s, knowledge_base_a, ada_id, eng_id, "WORKED_ON", "job-1")
-        write_provenance(s, knowledge_base_a, ada_id, "job-ada", label="Ada Source", date="2024-01-01")
+        write_provenance(s, knowledge_base_a, ada_id, "job-ada", label="Ada Source", published_at="2024-01-01")
         upsert_entity(
             s, knowledge_base_b, secret_id, ExtractedEntity(name="Secret", type="Person", description="d"), "x", "x"
         )
-        write_provenance(s, knowledge_base_b, secret_id, "job-secret", label="Secret Source", date="2024-02-02")
+        write_provenance(s, knowledge_base_b, secret_id, "job-secret", label="Secret Source", published_at="2024-02-02")
         # Same name as knowledge_base_a's node, but in knowledge_base_b: proves full-text
         # `search` is knowledge_base-scoped, not just name-scoped.
         upsert_entity(
@@ -208,7 +208,9 @@ def test_node_exposes_article_and_references(seeded) -> None:  # type: ignore[no
     resp = _gql(client, key, f'{{ node(id: "{ada_id}") {{ article references {{ label date }} }} }}')
     node = resp.json()["data"]["node"]
     assert node["article"] == "Ada article"
-    assert node["references"] == [{"label": "Ada Source", "date": "2024-01-01"}]
+    assert len(node["references"]) == 1
+    assert node["references"][0]["label"] == "Ada Source"
+    assert node["references"][0]["date"].startswith("2024-01-01")  # native datetime -> ISO string
 
 
 @requires_stack

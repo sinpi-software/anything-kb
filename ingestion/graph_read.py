@@ -67,7 +67,7 @@ def query_references(knowledge_base_id: str, entity_id: str) -> list[dict[str, A
             for r in session.run(
                 "MATCH (e:Entity {id: $id, knowledge_base_id: $kb})"
                 "-[:MENTIONED_IN]->(s:Source {knowledge_base_id: $kb}) "
-                "RETURN s.label AS label, s.date AS date ORDER BY s.date",
+                "RETURN s.label AS label, toString(s.published_at) AS date ORDER BY s.published_at",
                 {"id": entity_id, "kb": knowledge_base_id},
             )
         ]

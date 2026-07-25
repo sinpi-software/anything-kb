@@ -829,7 +829,7 @@ def test_merge_content_new_entity_stores_description_as_article_without_synthesi
             [],
             job_id,
             source_label="newsletter",
-            source_date="2026-07-22",
+            source_published_at="2026-07-22",
         )
         assert result.entities_created == 1
         with get_neo4j_session() as neo:
@@ -840,11 +840,12 @@ def test_merge_content_new_entity_stores_description_as_article_without_synthesi
             assert row["a"] == description
             assert row["s"] == knowledge_mod._derive_abstract(description)
             source = neo.run(
-                "MATCH (s:Source {knowledge_base_id: $o, job_id: $j}) RETURN s.label AS l, s.date AS d",
+                "MATCH (s:Source {knowledge_base_id: $o, job_id: $j}) "
+                "RETURN s.label AS l, toString(s.published_at) AS d",
                 {"o": knowledge_base_id, "j": job_id},
             ).single(True)
             assert source["l"] == "newsletter"
-            assert source["d"] == "2026-07-22"
+            assert source["d"].startswith("2026-07-22")  # stored as a native datetime
     finally:
         with get_neo4j_session() as neo:
             neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})

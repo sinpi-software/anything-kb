@@ -3,6 +3,7 @@ import re
 import threading
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from neo4j import Session
@@ -374,12 +375,35 @@ def write_relationship(
     )
 
 
+def _iso_or_empty(value: str) -> str:
+    """Normalize a date string to ISO-8601, or '' if empty/unparseable — so the Cypher
+    datetime() call only ever receives a valid temporal literal and a bad producer date
+    can't crash ingestion."""
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).isoformat()
+    except ValueError:
+        return ""
+
+
 def write_provenance(
-    session: Session, knowledge_base_id: str, entity_id: str, job_id: str, *, label: str = "", date: str = ""
+    session: Session,
+    knowledge_base_id: str,
+    entity_id: str,
+    job_id: str,
+    *,
+    label: str = "",
+    published_at: str = "",
+    ingested_at: str = "",
 ) -> None:
+    # published_at = when the news happened (the article's date); ingested_at = when we saw it.
+    # Both stored as native datetimes so discovery queries can do duration math (null when absent).
     session.run(
         "MERGE (s:Source {knowledge_base_id: $knowledge_base_id, job_id: $job_id}) "
-        "SET s.label = $label, s.date = $date "
+        "SET s.label = $label, "
+        "s.published_at = CASE WHEN $published_at = '' THEN null ELSE datetime($published_at) END, "
+        "s.ingested_at = CASE WHEN $ingested_at = '' THEN null ELSE datetime($ingested_at) END "
         "WITH s MATCH (e:Entity {id: $entity_id, knowledge_base_id: $knowledge_base_id}) "
         "MERGE (e)-[:MENTIONED_IN]->(s)",
         {
@@ -387,7 +411,8 @@ def write_provenance(
             "job_id": job_id,
             "entity_id": entity_id,
             "label": label,
-            "date": date,
+            "published_at": _iso_or_empty(published_at),
+            "ingested_at": _iso_or_empty(ingested_at),
         },
     )
 
@@ -501,7 +526,8 @@ def merge_content(
     interests: str = "",
     discover: bool = False,
     source_label: str = "",
-    source_date: str = "",
+    source_published_at: str = "",
+    source_ingested_at: str = "",
 ) -> MergeResult:
     active_entities = [t for t in entity_types if not t.get("banned")]
     active_rels = [t for t in relationship_types if not t.get("banned")]
@@ -605,7 +631,15 @@ def merge_content(
                 article, summary = result.article, result.abstract
                 merged += 1
             upsert_entity(neo, knowledge_base_id, entity_id, entity, summary, article)
-            write_provenance(neo, knowledge_base_id, entity_id, job_id, label=source_label, date=source_date)
+            write_provenance(
+                neo,
+                knowledge_base_id,
+                entity_id,
+                job_id,
+                label=source_label,
+                published_at=source_published_at,
+                ingested_at=source_ingested_at,
+            )
             name_to_id[normalize_name(entity.name)] = entity_id
 
         rel_examples: dict[str, str] = {}

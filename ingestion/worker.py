@@ -56,8 +56,13 @@ def process_job(job_id: str) -> None:
         discover = bool(cfg.discover_types) if cfg else False
         entity_types = list(cfg.entity_types) if cfg else []
         relationship_types = list(cfg.relationship_types) if cfg else []
-        source_label = (job.job_metadata or {}).get("source", "") if job.job_metadata else ""
-        source_date = job.created_at.isoformat() if job.created_at else ""
+        meta = job.job_metadata or {}
+        ingested_at = job.created_at.isoformat() if job.created_at else ""
+        source_label = meta.get("source", "")
+        # The news date if the producer supplied it (e.g. RSS pubDate); otherwise fall back to
+        # when we ingested it, so recency queries always have something to sort on.
+        source_published_at = meta.get("published_at") or ingested_at
+        source_ingested_at = ingested_at
 
     try:
         verdict = judge_relevance(interests, content)
@@ -73,7 +78,8 @@ def process_job(job_id: str) -> None:
             interests=interests,
             discover=discover,
             source_label=source_label,
-            source_date=source_date,
+            source_published_at=source_published_at,
+            source_ingested_at=source_ingested_at,
         )
         _persist_new_types(knowledge_base_id, result.new_entity_types, result.new_relationship_types)
         _finalize(job_id, JobStatus.DONE, relevance_reason=verdict.reason)

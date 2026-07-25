@@ -2,6 +2,7 @@ import os
 import re
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from neo4j import Session
@@ -323,6 +324,8 @@ class MergeResult(BaseModel):
     entities_created: int
     entities_merged: int
     relationships_created: int
+    new_entity_types: list[dict[str, str]] = []
+    new_relationship_types: list[dict[str, str]] = []
 
 
 def _norm_type(name: str) -> str:
@@ -393,19 +396,82 @@ def merge_content(
     entity_types: list[dict[str, str]],
     relationship_types: list[dict[str, str]],
     job_id: str,
+    *,
+    interests: str = "",
+    discover: bool = False,
 ) -> MergeResult:
-    # Map a normalized key back to the exact configured name — that name is what we store,
-    # so labels display the way the user wrote them regardless of the model's casing.
-    entity_canon = {_norm_type(t["name"]): t["name"] for t in entity_types}
-    rel_canon = {_norm_type(t["name"]): t["name"] for t in relationship_types}
+    active_entities = [t for t in entity_types if not t.get("banned")]
+    active_rels = [t for t in relationship_types if not t.get("banned")]
+    # canon holds ACTIVE (non-banned) types only; banned is a disjoint drop-set. Order in resolve()
+    # is safe because the two sets never overlap.
+    entity_canon = {_norm_type(t["name"]): t["name"] for t in active_entities}
+    rel_canon = {_norm_type(t["name"]): t["name"] for t in active_rels}
+    banned_ent = {_norm_type(t["name"]) for t in entity_types if t.get("banned")}
+    banned_rel = {_norm_type(t["name"]) for t in relationship_types if t.get("banned")}
+    new_entity_types: list[dict[str, str]] = []
+    new_relationship_types: list[dict[str, str]] = []
     llm_params: dict[str, Any] = {}
     created = merged = rels = 0
     name_to_id: dict[str, str] = {}
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
-        extraction = extract_knowledge(client, config.LLM_MODEL, entity_types, relationship_types, content, llm_params)
+        extraction = extract_knowledge(
+            client,
+            config.LLM_MODEL,
+            entity_types,
+            relationship_types,
+            content,
+            llm_params,
+            interests=interests,
+            discover=discover,
+        )
+
+        def resolve_kind(
+            kind: str,
+            extracted_types: set[str],
+            canon: dict[str, str],
+            banned: set[str],
+            new_out: list[dict[str, str]],
+            vocab: list[dict[str, str]],
+        ) -> Callable[[str], str | None]:
+            unmatched = sorted(
+                {t for t in extracted_types if _norm_type(t) not in canon and _norm_type(t) not in banned}
+            )
+            decisions: dict[str, dict[str, str]] = {}
+            if discover and unmatched:
+                try:
+                    decisions = consolidate_types(
+                        client, config.LLM_MODEL, kind, unmatched, vocab, interests, llm_params
+                    )
+                except Exception:
+                    decisions = {}  # fast-path fallback: known types kept, novel deferred
+
+            def resolve(t: str) -> str | None:
+                key = _norm_type(t)
+                if key in canon:
+                    return canon[key]
+                if key in banned:
+                    return None
+                d = decisions.get(key)
+                if not d or d["decision"] == "drop":
+                    return None
+                if d["decision"] == "existing" and _norm_type(d["canonical"]) in canon:
+                    return canon[_norm_type(d["canonical"])]
+                if d["decision"] == "new" and _norm_type(d["name"]) not in banned:
+                    name = d["name"]
+                    if _norm_type(name) not in canon:
+                        canon[_norm_type(name)] = name
+                        new_out.append({"name": name, "description": d.get("description", "")})
+                    return name
+                return None
+
+            return resolve
+
+        resolve_entities = resolve_kind(
+            "entity", {e.type for e in extraction.entities}, entity_canon, banned_ent, new_entity_types, active_entities
+        )
         entities = []
         for e in extraction.entities:
-            canonical = entity_canon.get(_norm_type(e.type))
+            canonical = resolve_entities(e.type)
             if canonical is not None:
                 e.type = canonical  # normalize to the configured casing before storing
                 entities.append(e)
@@ -427,8 +493,16 @@ def merge_content(
             write_provenance(neo, knowledge_base_id, entity_id, job_id)
             name_to_id[normalize_name(entity.name)] = entity_id
 
+        resolve_rels = resolve_kind(
+            "relationship",
+            {r.type for r in extraction.relationships},
+            rel_canon,
+            banned_rel,
+            new_relationship_types,
+            active_rels,
+        )
         for rel in extraction.relationships:
-            canonical = rel_canon.get(_norm_type(rel.type))
+            canonical = resolve_rels(rel.type)
             if canonical is None:
                 continue
             src = name_to_id.get(normalize_name(rel.source_name))
@@ -436,4 +510,10 @@ def merge_content(
             if src and tgt:
                 write_relationship(neo, knowledge_base_id, src, tgt, canonical, job_id)
                 rels += 1
-    return MergeResult(entities_created=created, entities_merged=merged, relationships_created=rels)
+    return MergeResult(
+        entities_created=created,
+        entities_merged=merged,
+        relationships_created=rels,
+        new_entity_types=new_entity_types,
+        new_relationship_types=new_relationship_types,
+    )

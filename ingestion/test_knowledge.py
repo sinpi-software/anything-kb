@@ -419,6 +419,72 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
 
 
 @requires_neo4j_and_postgres
+def test_merge_content_consolidates_novel_relationship_type_and_records_new_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_schema()
+    extraction = KnowledgeExtraction(
+        entities=[
+            ExtractedEntity(name="Ada", type="person", description="d"),
+        ],
+        relationships=[
+            ExtractedRelationship(source_name="Ada", target_name="Ada", type="AFFECTED_BY"),
+            # Novel relationship type — no fast-path match, resolved via consolidate_types.
+            ExtractedRelationship(source_name="Ada", target_name="Ada", type="endorsed"),
+        ],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
+    monkeypatch.setattr(
+        knowledge_mod,
+        "consolidate_types",
+        lambda *a, **k: {
+            knowledge_mod._norm_type("endorsed"): {
+                "decision": "new",
+                "name": "Endorses",
+                "description": "backs publicly",
+            }
+        },
+    )
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            "Ada endorsed Ada and is affected by Ada.",
+            [{"name": "Person", "description": ""}],
+            [{"name": "Affected by", "description": ""}],
+            job_id,
+            discover=True,
+        )
+        assert result.relationships_created == 2
+        assert result.new_relationship_types == [{"name": "Endorses", "description": "backs publicly"}]
+        with get_neo4j_session() as neo:
+            types = {
+                r["t"]
+                for r in neo.run(
+                    "MATCH (:Entity {knowledge_base_id: $o})-[r:RELATED]->() RETURN r.type AS t",
+                    {"o": knowledge_base_id},
+                )
+            }
+            assert types == {"Affected by", "Endorses"}
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
 def test_merge_content_normalizes_type_casing_and_stores_configured_name(monkeypatch: pytest.MonkeyPatch) -> None:
     bootstrap_schema()
     # The model emits UPPER_SNAKE / lowercase even though the config uses sentence case.

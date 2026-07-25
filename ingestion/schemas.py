@@ -26,17 +26,21 @@ class TypeDef(BaseModel):
 
     name: str
     description: str = ""
+    pinned: bool = False
+    banned: bool = False
 
 
 class ConfigRequest(BaseModel):
-    relevance_prompt: str
+    interests: str
+    discover_types: bool = True
     entity_types: list[TypeDef]
     relationship_types: list[TypeDef]
 
 
 class ConfigResponse(BaseModel):
     knowledge_base_id: str
-    relevance_prompt: str
+    interests: str
+    discover_types: bool
     entity_types: list[TypeDef]
     relationship_types: list[TypeDef]
 

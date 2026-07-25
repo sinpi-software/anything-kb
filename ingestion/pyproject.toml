@@ -32,6 +32,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 known-first-party = [
     "accounts",
     "auth",
+    "backfill_articles",
     "config",
     "db",
     "graph_api",

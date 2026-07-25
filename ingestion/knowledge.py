@@ -7,7 +7,7 @@ from typing import Any
 
 from neo4j import Session
 from openrouter import OpenRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 import config
 from neo4j_client import get_neo4j_session
@@ -292,9 +292,12 @@ def synthesize_article(
         "json_schema": {"name": "article", "strict": True, "schema": _strict_schema(ArticleResult.model_json_schema())},
     }
     out = _chat(client, model, messages, llm_params, schema)
-    if out is None:
+    if not out:
         return ArticleResult(abstract=_derive_abstract(existing_article), article=existing_article)
-    return ArticleResult.model_validate_json(out)
+    try:
+        return ArticleResult.model_validate_json(out)
+    except ValidationError:
+        return ArticleResult(abstract=_derive_abstract(existing_article), article=existing_article)
 
 
 def upsert_entity(

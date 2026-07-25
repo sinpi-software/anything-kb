@@ -177,6 +177,38 @@ def test_synthesize_article_falls_back_on_empty(monkeypatch: pytest.MonkeyPatch)
     assert out.article == "Existing body. More." and out.abstract == "Existing body."
 
 
+def test_synthesize_article_falls_back_on_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_chat can return "" (empty but non-None); this must fall back like None, not
+    reach model_validate_json with an empty payload."""
+    from knowledge import synthesize_article
+
+    monkeypatch.setattr(knowledge_mod, "_chat", lambda *a, **k: "")
+    out = synthesize_article(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        existing_article="Existing body. More.",
+        new_info="new",
+        llm_params={},
+    )
+    assert out.article == "Existing body. More." and out.abstract == "Existing body."
+
+
+def test_synthesize_article_falls_back_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-JSON/invalid LLM response must not raise ValidationError out of synthesize_article
+    (which would otherwise propagate through merge_content and fail the whole ingest)."""
+    from knowledge import synthesize_article
+
+    monkeypatch.setattr(knowledge_mod, "_chat", lambda *a, **k: "not json")
+    out = synthesize_article(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        existing_article="Existing body. More.",
+        new_info="new",
+        llm_params={},
+    )
+    assert out.article == "Existing body. More." and out.abstract == "Existing body."
+
+
 class _FakeMessage:
     def __init__(self, content: str) -> None:
         self.content = content

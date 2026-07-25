@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import text as sqltext
 
 import config
-from graph_read import query_edges
+from graph_read import query_edges, query_references
 from knowledge import ExtractedEntity, upsert_entity, write_provenance, write_relationship
 from neo4j_client import bootstrap_schema, get_neo4j_session
 
@@ -235,6 +235,38 @@ def test_query_edges_excludes_cross_knowledge_base_target() -> None:
                 },
             )
         assert query_edges(knowledge_base_a, src_id, None) == []
+    finally:
+        with get_neo4j_session() as s:
+            s.run(
+                "MATCH (n) WHERE n.knowledge_base_id IN [$a, $b] DETACH DELETE n",
+                {"a": knowledge_base_a, "b": knowledge_base_b},
+            )
+
+
+@requires_stack
+def test_query_references_excludes_cross_knowledge_base_source() -> None:
+    # Simulates a corrupt/foreign-target MENTIONED_IN edge (knowledge_base-A entity, knowledge_base-B
+    # Source, edge stamped as if it belonged to knowledge_base-A) that write_provenance could never
+    # produce but a future writer or a bad migration could. query_references must drop it because
+    # s.knowledge_base_id != $kb, not because the write side happens to keep edges same-knowledge_base.
+    knowledge_base_a, knowledge_base_b = f"a-{uuid.uuid4()}", f"b-{uuid.uuid4()}"
+    entity_id, foreign_source_job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    try:
+        with get_neo4j_session() as s:
+            s.run(
+                "CREATE (e:Entity {id: $entity_id, knowledge_base_id: $knowledge_base_a, "
+                "type: 'Person', name: 'Src', summary: 's'}), "
+                "(src:Source {knowledge_base_id: $knowledge_base_b, job_id: $job_id, "
+                "label: 'Foreign Source', date: '2024-03-03'}), "
+                "(e)-[:MENTIONED_IN]->(src)",
+                {
+                    "entity_id": entity_id,
+                    "knowledge_base_a": knowledge_base_a,
+                    "knowledge_base_b": knowledge_base_b,
+                    "job_id": foreign_source_job_id,
+                },
+            )
+        assert query_references(knowledge_base_a, entity_id) == []
     finally:
         with get_neo4j_session() as s:
             s.run(

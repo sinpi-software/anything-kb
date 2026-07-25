@@ -12,7 +12,7 @@ from sqlalchemy import text as sqltext
 
 import config
 from graph_read import query_edges
-from knowledge import ExtractedEntity, upsert_entity, write_relationship
+from knowledge import ExtractedEntity, upsert_entity, write_provenance, write_relationship
 from neo4j_client import bootstrap_schema, get_neo4j_session
 
 
@@ -75,9 +75,11 @@ def seeded():  # type: ignore[no-untyped-def]
             "Engine article",
         )
         write_relationship(s, knowledge_base_a, ada_id, eng_id, "WORKED_ON", "job-1")
+        write_provenance(s, knowledge_base_a, ada_id, "job-ada", label="Ada Source", date="2024-01-01")
         upsert_entity(
             s, knowledge_base_b, secret_id, ExtractedEntity(name="Secret", type="Person", description="d"), "x", "x"
         )
+        write_provenance(s, knowledge_base_b, secret_id, "job-secret", label="Secret Source", date="2024-02-02")
         # Same name as knowledge_base_a's node, but in knowledge_base_b: proves full-text
         # `search` is knowledge_base-scoped, not just name-scoped.
         upsert_entity(
@@ -198,6 +200,15 @@ def test_search_is_knowledge_base_scoped(seeded) -> None:  # type: ignore[no-unt
     results = resp.json()["data"]["nodes"]
     assert [r["name"] for r in results] == ["Ada"]
     assert results[0]["summary"] == "Ada summary"
+
+
+@requires_stack
+def test_node_exposes_article_and_references(seeded) -> None:  # type: ignore[no-untyped-def]
+    client, key, _knowledge_base, ada_id, _eng, _knowledge_base_b, _secret = seeded
+    resp = _gql(client, key, f'{{ node(id: "{ada_id}") {{ article references {{ label date }} }} }}')
+    node = resp.json()["data"]["node"]
+    assert node["article"] == "Ada article"
+    assert node["references"] == [{"label": "Ada Source", "date": "2024-01-01"}]
 
 
 @requires_stack

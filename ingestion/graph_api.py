@@ -12,17 +12,29 @@ from models import User
 
 
 @strawberry.type
+class Reference:
+    label: str
+    date: str
+
+
+@strawberry.type
 class Node:
     id: strawberry.ID
     type: str
     name: str
     summary: str | None
+    article: str | None
     knowledge_base_id: strawberry.Private[str]
 
     @strawberry.field
     def edges(self, type: str | None = None) -> list["Edge"]:
         rows = graph_read.query_edges(self.knowledge_base_id, str(self.id), type)
         return [Edge(type=row["type"], target=_to_node(row["target"], self.knowledge_base_id)) for row in rows]
+
+    @strawberry.field
+    def references(self) -> list[Reference]:
+        rows = graph_read.query_references(self.knowledge_base_id, str(self.id))
+        return [Reference(label=r.get("label") or "", date=r.get("date") or "") for r in rows]
 
 
 @strawberry.type
@@ -37,6 +49,7 @@ def _to_node(row: dict[str, Any], knowledge_base_id: str) -> Node:
         type=row["type"],
         name=row["name"],
         summary=row["summary"],
+        article=row.get("article"),
         knowledge_base_id=knowledge_base_id,
     )
 

@@ -4,7 +4,7 @@ import config
 from knowledge import escape_lucene
 from neo4j_client import get_neo4j_session
 
-_NODE_RETURN = "RETURN e.id AS id, e.type AS type, e.name AS name, e.summary AS summary"
+_NODE_RETURN = "RETURN e.id AS id, e.type AS type, e.name AS name, e.summary AS summary, e.article AS article"
 
 
 def query_nodes(knowledge_base_id: str, type_: str | None, search: str | None, limit: int) -> list[dict[str, Any]]:
@@ -57,4 +57,16 @@ def query_edges(knowledge_base_id: str, node_id: str, type_: str | None) -> list
                 "target": {"id": row["id"], "type": row["ntype"], "name": row["name"], "summary": row["summary"]},
             }
             for row in session.run(cypher, params)
+        ]
+
+
+def query_references(knowledge_base_id: str, entity_id: str) -> list[dict[str, Any]]:
+    with get_neo4j_session() as session:
+        return [
+            dict(r)
+            for r in session.run(
+                "MATCH (e:Entity {id: $id, knowledge_base_id: $kb})-[:MENTIONED_IN]->(s:Source) "
+                "RETURN s.label AS label, s.date AS date ORDER BY s.date",
+                {"id": entity_id, "kb": knowledge_base_id},
+            )
         ]

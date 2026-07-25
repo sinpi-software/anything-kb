@@ -127,10 +127,11 @@ def test_build_extraction_messages_bars_vague_phrase_entities(discover: bool) ->
 def test_build_extraction_messages_pushes_relationship_completeness(discover: bool) -> None:
     msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
     joined = " ".join(m["content"] for m in msgs).lower()
-    # Both modes must push the model to connect + anchor entities into a shared geographic
-    # backbone (county/state) so the graph coheres, and keep endpoints matching entity names.
+    # Both modes must push the model to connect + anchor entities to recurring shared hubs so the
+    # graph coheres — domain-agnostic, NOT hardcoded to geography — and keep endpoints matching names.
     assert "connect and anchor" in joined
-    assert "county and state" in joined
+    assert "recurring anchors" in joined
+    assert "companies and technologies" in joined  # a non-geographic domain example is present
     assert "name of an entity in your entities list" in joined
 
 

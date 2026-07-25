@@ -82,21 +82,23 @@ _ENTITY_QUALITY = (
     "into the relevant entity's description rather than creating a node for it."
 )
 
-# Nano under-emits relationships (leaving nodes stranded) AND fails to anchor each story's
-# entities to the broader places/organizations that recur across stories — so the graph
-# splinters into one island per document. This pushes for both local links and shared anchors.
+# A graph coheres when entities are anchored to the recurring higher-level "hub" entities that many
+# documents share. What those hubs ARE is domain-specific (places for local news, companies and
+# technologies for tech, institutions and fields for research) — so state the general principle and
+# let the model infer the right anchors from the content, rather than hardcoding one domain.
 _RELATIONSHIP_COMPLETENESS = (
-    "Connect and anchor every entity so the graph forms one connected whole, not one island per story. "
-    "Emit each relationship the text supports, and tie every entity to the broader context that "
-    "situates it (a venue to its city, a person to their organization, an event to where it happens). "
-    "Build a geographic backbone from SEPARATE, linked nodes: for each town or city, create distinct "
-    "entities for the town, its county, and its state (from your own knowledge if the text omits them) "
-    "and link them with 'Located in' relationships — e.g. 'Kelso' -> 'Cowlitz County' -> 'Washington' "
-    "as three separate entities. NEVER fold the hierarchy into one compound name like "
-    "'Kelso, Cowlitz County, Washington'; keep the bare county and state as their own nodes, named "
-    "identically every time, so every town in a county links to the same shared county node. Each "
-    "relationship's source and target MUST be written exactly as the name of an entity in your "
-    "entities list (same spelling)."
+    "Connect and anchor every entity so the graph forms one connected whole, not one island per "
+    "document. Emit each relationship the text supports so no entity is left unconnected, and tie every "
+    "entity to the broader, longer-lived entities that give it context — the organization it belongs "
+    "to, the place it sits in, the person behind it, the field or work it is part of. Build the graph's "
+    "backbone from the RECURRING anchors of this material: the higher-level, slowly-changing entities "
+    "that many different documents mention in common (for regional news these are places — a town "
+    "within its county within its state; for technology they are companies and technologies; for "
+    "research they are institutions and fields). Create each such anchor as its own separate, "
+    "consistently-named node — never fold a hierarchy into a compound name like "
+    "'Kelso, Cowlitz County, Washington' — and add it from your own knowledge when the text omits it, "
+    "so separate documents connect through the anchors they share. Each relationship's source and "
+    "target MUST be written exactly as the name of an entity in your entities list (same spelling)."
 )
 
 

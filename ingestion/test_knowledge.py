@@ -111,9 +111,7 @@ def test_build_extraction_messages_guided_mode_forbids_new_types() -> None:
 
 @pytest.mark.parametrize("discover", [True, False])
 def test_build_extraction_messages_bars_vague_phrase_entities(discover: bool) -> None:
-    msgs = build_extraction_messages(
-        [{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover
-    )
+    msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
     joined = " ".join(m["content"] for m in msgs).lower()
     # Both modes must instruct the model to skip descriptive noun-phrases like
     # "a two-year legal battle" instead of minting them as their own nodes.

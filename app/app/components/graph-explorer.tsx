@@ -1,5 +1,6 @@
 import { Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -66,6 +67,7 @@ function readColors() {
 }
 
 export function GraphExplorer() {
+  const navigate = useNavigate();
   // react-force-graph-2d is browser-only (canvas), so it's dynamically imported on the client.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ForceGraph, setForceGraph] = useState<any>(null);
@@ -178,6 +180,8 @@ export function GraphExplorer() {
             linkColor={() => colors.link}
             linkDirectionalArrowLength={3}
             linkDirectionalArrowRelPos={1}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            onNodeClick={(node: any) => navigate(`/app/entity/${node.id}`)}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
               ctx.beginPath();

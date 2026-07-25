@@ -101,7 +101,9 @@ def build_extraction_messages(
             f"Relationship types:\n{_render_types(relationship_types)}\n\n"
             "When you find something genuinely new that matches the user's interests and no existing "
             "type fits, coin a concise new type name and use it. Do not force-fit and do not create "
-            "types for incidental mentions.\n\n"
+            "types for incidental mentions. Only coin a type for a category of durable, "
+            "individually-referenceable things (people, organizations, places, works, events) — never "
+            "for time windows, durations, dates, quantities, measurements, or descriptive attributes.\n\n"
             f"{_ENTITY_QUALITY}\n\n"
             "For each entity, write a thorough, self-contained description (a rich paragraph, not a label)."
         )

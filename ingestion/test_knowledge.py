@@ -101,6 +101,9 @@ def test_build_extraction_messages_open_mode_includes_interests_and_invites_new_
     assert "US civic politics" in joined
     assert "Person" in joined and "a named human" in joined
     assert "new" in joined.lower()  # invites coining new types
+    # New types must be durable categories, never temporal/quantity ones (blocks the coined `TimeWindow` type).
+    assert "durable, individually-referenceable" in joined
+    assert "time windows, durations" in joined
 
 
 def test_build_extraction_messages_guided_mode_forbids_new_types() -> None:

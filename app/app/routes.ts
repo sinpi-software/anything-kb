@@ -11,4 +11,5 @@ export default [
   route("app/ingest", "routes/ingest.tsx"),
   route("app/config", "routes/config.tsx"),
   route("app/explore", "routes/explore.tsx"),
+  route("app/entity/:id", "routes/entity.tsx"),
 ] satisfies RouteConfig;

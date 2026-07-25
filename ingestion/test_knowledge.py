@@ -147,6 +147,36 @@ def test_strict_schema_closes_objects_and_requires_all_keys() -> None:
     assert "default" not in entity["properties"]["aliases"]
 
 
+def test_derive_abstract_takes_first_sentence_truncated() -> None:
+    from knowledge import _derive_abstract
+
+    assert _derive_abstract("Ada was a mathematician. She wrote the first algorithm.") == "Ada was a mathematician."
+    assert len(_derive_abstract("x " * 400)) <= 240
+
+
+def test_synthesize_article_returns_structured_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    from knowledge import ArticleResult, synthesize_article
+
+    payload = ArticleResult(abstract="Ada, a mathematician.", article="Ada Lovelace…\n\n## Work\n…").model_dump_json()
+    monkeypatch.setattr(knowledge_mod, "_chat", lambda *a, **k: payload)
+    out = synthesize_article(client=None, model="m", existing_article="old", new_info="new", llm_params={})  # type: ignore[arg-type]
+    assert out.abstract == "Ada, a mathematician." and out.article.startswith("Ada Lovelace")
+
+
+def test_synthesize_article_falls_back_on_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from knowledge import synthesize_article
+
+    monkeypatch.setattr(knowledge_mod, "_chat", lambda *a, **k: None)
+    out = synthesize_article(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        existing_article="Existing body. More.",
+        new_info="new",
+        llm_params={},
+    )
+    assert out.article == "Existing body. More." and out.abstract == "Existing body."
+
+
 class _FakeMessage:
     def __init__(self, content: str) -> None:
         self.content = content

@@ -273,6 +273,44 @@ def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_p
     return (_chat(client, model, messages, llm_params) or existing).strip()
 
 
+class ArticleResult(BaseModel):
+    abstract: str
+    article: str
+
+
+def _derive_abstract(text: str) -> str:
+    """A cheap (no-LLM) short abstract: the first sentence, capped at 240 chars."""
+    text = text.strip()
+    head = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0] if text else ""
+    return head[:240]
+
+
+def synthesize_article(
+    client: OpenRouter, model: str, existing_article: str, new_info: str, llm_params: dict[str, Any]
+) -> ArticleResult:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You maintain an encyclopedia article about one entity as a living document. Integrate "
+                "the new information into the existing article: a lead paragraph, then `## Section` "
+                "headings as the material warrants. Keep all existing facts, add the new ones, and note "
+                "contradictions. Do NOT add a References or Sources section and do NOT add inline "
+                "citations — sources are tracked separately. Also produce a one-to-two-sentence abstract."
+            ),
+        },
+        {"role": "user", "content": f"Existing article:\n{existing_article}\n\nNew source:\n{new_info}"},
+    ]
+    schema = {
+        "type": "json_schema",
+        "json_schema": {"name": "article", "strict": True, "schema": _strict_schema(ArticleResult.model_json_schema())},
+    }
+    out = _chat(client, model, messages, llm_params, schema)
+    if out is None:
+        return ArticleResult(abstract=_derive_abstract(existing_article), article=existing_article)
+    return ArticleResult.model_validate_json(out)
+
+
 def upsert_entity(
     session: Session, knowledge_base_id: str, entity_id: str, entity: ExtractedEntity, summary: str
 ) -> None:

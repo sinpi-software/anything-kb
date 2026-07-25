@@ -259,20 +259,6 @@ def resolve_entities_batch(
     return resolved
 
 
-def merge_summary(client: OpenRouter, model: str, existing: str, new: str, llm_params: dict[str, Any]) -> str:
-    messages = [
-        {
-            "role": "system",
-            "content": "You maintain an encyclopedia article about an entity. Integrate the new "
-            "information into the existing article, growing it into a comprehensive, well-organized "
-            "entry (use multiple paragraphs/sections as the material warrants). Keep all existing "
-            "facts, add the new ones, and note any contradictions. Return only the article text.",
-        },
-        {"role": "user", "content": f"Existing article:\n{existing}\n\nNew source:\n{new}"},
-    ]
-    return (_chat(client, model, messages, llm_params) or existing).strip()
-
-
 class ArticleResult(BaseModel):
     abstract: str
     article: str
@@ -312,12 +298,12 @@ def synthesize_article(
 
 
 def upsert_entity(
-    session: Session, knowledge_base_id: str, entity_id: str, entity: ExtractedEntity, summary: str
+    session: Session, knowledge_base_id: str, entity_id: str, entity: ExtractedEntity, summary: str, article: str
 ) -> None:
     session.run(
         "MERGE (e:Entity {id: $id}) "
         "ON CREATE SET e.knowledge_base_id = $knowledge_base_id, e.type = $type, e.created_at = datetime() "
-        "SET e.name = $name, e.name_normalized = $nn, e.summary = $summary, "
+        "SET e.name = $name, e.name_normalized = $nn, e.summary = $summary, e.article = $article, "
         "e.aliases = $aliases, e.updated_at = datetime()",
         {
             "id": entity_id,
@@ -326,6 +312,7 @@ def upsert_entity(
             "name": entity.name,
             "nn": normalize_name(entity.name),
             "summary": summary,
+            "article": article,
             "aliases": [normalize_name(a) for a in entity.aliases],
         },
     )
@@ -516,18 +503,20 @@ def merge_content(
         resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, knowledge_base_id, entities, llm_params)
         for entity, existing_id in zip(entities, resolved_ids, strict=True):
             if existing_id is None:
-                entity_id, summary = str(uuid.uuid4()), entity.description
+                entity_id = str(uuid.uuid4())
+                article, summary = entity.description, _derive_abstract(entity.description)
                 created += 1
             else:
                 entity_id = existing_id
                 row = neo.run(
-                    "MATCH (e:Entity {id: $id, knowledge_base_id: $knowledge_base_id}) RETURN e.summary AS s",
+                    "MATCH (e:Entity {id: $id, knowledge_base_id: $knowledge_base_id}) RETURN e.article AS a",
                     {"id": entity_id, "knowledge_base_id": knowledge_base_id},
                 ).single()
-                existing_summary = row["s"] if row else ""
-                summary = merge_summary(client, config.LLM_MODEL, existing_summary, entity.description, llm_params)
+                existing_article = row["a"] if row and row["a"] else ""
+                result = synthesize_article(client, config.LLM_MODEL, existing_article, entity.description, llm_params)
+                article, summary = result.article, result.abstract
                 merged += 1
-            upsert_entity(neo, knowledge_base_id, entity_id, entity, summary)
+            upsert_entity(neo, knowledge_base_id, entity_id, entity, summary, article)
             write_provenance(neo, knowledge_base_id, entity_id, job_id)
             name_to_id[normalize_name(entity.name)] = entity_id
 

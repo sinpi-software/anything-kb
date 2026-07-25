@@ -304,14 +304,29 @@ def test_upsert_and_relationship_roundtrip() -> None:
     try:
         with get_neo4j_session() as session:
             upsert_entity(
-                session, knowledge_base, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A"
+                session,
+                knowledge_base,
+                a_id,
+                ExtractedEntity(name="Ada", type="Person", description="d"),
+                "sum A",
+                "art A",
             )
             upsert_entity(
-                session, knowledge_base, b_id, ExtractedEntity(name="Engine", type="Thing", description="d"), "sum B"
+                session,
+                knowledge_base,
+                b_id,
+                ExtractedEntity(name="Engine", type="Thing", description="d"),
+                "sum B",
+                "art B",
             )
-            # Re-upsert A with a new summary — must update, not duplicate.
+            # Re-upsert A with a new summary/article — must update, not duplicate.
             upsert_entity(
-                session, knowledge_base, a_id, ExtractedEntity(name="Ada", type="Person", description="d"), "sum A v2"
+                session,
+                knowledge_base,
+                a_id,
+                ExtractedEntity(name="Ada", type="Person", description="d"),
+                "sum A v2",
+                "art A v2",
             )
             write_relationship(session, knowledge_base, a_id, b_id, "WORKED_ON", "art-1")
             write_provenance(session, knowledge_base, a_id, "art-1")
@@ -320,8 +335,11 @@ def test_upsert_and_relationship_roundtrip() -> None:
                 "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c", {"o": knowledge_base}
             ).single(True)["c"]
             assert count == 2  # no duplicate
-            summ = session.run("MATCH (e:Entity {id: $id}) RETURN e.summary AS s", {"id": a_id}).single(True)["s"]
-            assert summ == "sum A v2"
+            row = session.run("MATCH (e:Entity {id: $id}) RETURN e.summary AS s, e.article AS a", {"id": a_id}).single(
+                True
+            )
+            assert row["s"] == "sum A v2"
+            assert row["a"] == "art A v2"
             rels = session.run(
                 "MATCH (:Entity {knowledge_base_id: $o})-[r:RELATED]->() RETURN r.type AS t", {"o": knowledge_base}
             ).single(True)["t"]
@@ -337,8 +355,8 @@ def test_knowledge_base_isolation() -> None:
     try:
         with get_neo4j_session() as session:
             ada = ExtractedEntity(name="Ada", type="Person", description="d")
-            upsert_entity(session, knowledge_base_a, str(uuid.uuid4()), ada, "A")
-            upsert_entity(session, knowledge_base_b, str(uuid.uuid4()), ada, "B")
+            upsert_entity(session, knowledge_base_a, str(uuid.uuid4()), ada, "A", "art A")
+            upsert_entity(session, knowledge_base_b, str(uuid.uuid4()), ada, "B", "art B")
             a_count = session.run(
                 "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c", {"o": knowledge_base_a}
             ).single(True)["c"]
@@ -363,6 +381,7 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_knowledge_base_sc
                 str(uuid.uuid4()),
                 ExtractedEntity(name="Barack Obama", type="Person", description="d"),
                 "s1",
+                "a1",
             )
             upsert_entity(
                 session,
@@ -370,6 +389,7 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_knowledge_base_sc
                 str(uuid.uuid4()),
                 ExtractedEntity(name="President Obama", type="Person", description="d"),
                 "s2",
+                "a2",
             )
             upsert_entity(
                 session,
@@ -377,6 +397,7 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_knowledge_base_sc
                 str(uuid.uuid4()),
                 ExtractedEntity(name="Obama Fried Chicken", type="Person", description="d"),
                 "s3",
+                "a3",
             )
             query, params = fulltext_candidate_query(knowledge_base_a, "Person", "Obama", 5)
             names = {r["name"] for r in session.run(query, params)}
@@ -403,7 +424,6 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
-    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
 
     class _NullClient:
         def __enter__(self) -> "_NullClient":
@@ -465,7 +485,6 @@ def test_merge_content_consolidates_novel_relationship_type_and_records_new_type
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
-    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
     monkeypatch.setattr(
         knowledge_mod,
         "consolidate_types",
@@ -529,7 +548,6 @@ def test_merge_content_normalizes_type_casing_and_stores_configured_name(monkeyp
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
-    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
 
     class _NullClient:
         def __enter__(self) -> "_NullClient":
@@ -583,7 +601,6 @@ def test_merge_content_new_type_colliding_with_existing_canon_uses_canonical_cas
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
-    monkeypatch.setattr(knowledge_mod, "merge_summary", lambda *a, **k: "merged")
     monkeypatch.setattr(
         knowledge_mod,
         "consolidate_types",
@@ -627,3 +644,121 @@ def test_merge_content_new_type_colliding_with_existing_canon_uses_canonical_cas
     finally:
         with get_neo4j_session() as neo:
             neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_new_entity_stores_description_as_article_without_synthesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A brand-new entity has nothing to merge into, so its description becomes the article verbatim
+    and the abstract is derived cheaply — synthesize_article must not be called at all."""
+    bootstrap_schema()
+    description = "Ada was a mathematician. She wrote the first algorithm."
+    extraction = KnowledgeExtraction(
+        entities=[ExtractedEntity(name="Ada", type="Person", description=description)],
+        relationships=[],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+
+    def _fail_if_called(*a: Any, **k: Any) -> Any:
+        raise AssertionError("synthesize_article must not be called for a new entity")
+
+    monkeypatch.setattr(knowledge_mod, "synthesize_article", _fail_if_called)
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            description,
+            [{"name": "Person", "description": ""}],
+            [],
+            job_id,
+        )
+        assert result.entities_created == 1
+        with get_neo4j_session() as neo:
+            row = neo.run(
+                "MATCH (e:Entity {knowledge_base_id: $o}) RETURN e.article AS a, e.summary AS s",
+                {"o": knowledge_base_id},
+            ).single(True)
+            assert row["a"] == description
+            assert row["s"] == knowledge_mod._derive_abstract(description)
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
+def test_merge_content_existing_entity_synthesizes_article_and_stores_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When resolution finds an existing entity, merge_content must read its stored article, pass it
+    to synthesize_article as the existing article, and persist the returned article + abstract."""
+    from knowledge import ArticleResult
+
+    bootstrap_schema()
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
+    entity_id = str(uuid.uuid4())
+    try:
+        with get_neo4j_session() as neo:
+            upsert_entity(
+                neo,
+                knowledge_base_id,
+                entity_id,
+                ExtractedEntity(name="Ada", type="Person", description="d"),
+                "old summary",
+                "Old article body.",
+            )
+
+        extraction = KnowledgeExtraction(
+            entities=[ExtractedEntity(name="Ada", type="Person", description="New fact about Ada.")],
+            relationships=[],
+        )
+        monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+        monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [entity_id])
+
+        seen_existing_articles: list[str] = []
+
+        def _fake_synthesize(client: Any, model: str, existing_article: str, new_info: str, llm_params: Any) -> Any:
+            seen_existing_articles.append(existing_article)
+            return ArticleResult(abstract="New abstract.", article="Merged article body.")
+
+        monkeypatch.setattr(knowledge_mod, "synthesize_article", _fake_synthesize)
+
+        class _NullClient:
+            def __enter__(self) -> "_NullClient":
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+        result = merge_content(
+            knowledge_base_id,
+            "New fact about Ada.",
+            [{"name": "Person", "description": ""}],
+            [],
+            job_id,
+        )
+        assert result.entities_merged == 1
+        assert seen_existing_articles == ["Old article body."]
+        with get_neo4j_session() as neo:
+            row = neo.run("MATCH (e:Entity {id: $id}) RETURN e.article AS a, e.summary AS s", {"id": entity_id}).single(
+                True
+            )
+            assert row["a"] == "Merged article body."
+            assert row["s"] == "New abstract."
+    finally:
+        _cleanup(knowledge_base_id)

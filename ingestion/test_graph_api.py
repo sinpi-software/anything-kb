@@ -59,14 +59,24 @@ def seeded():  # type: ignore[no-untyped-def]
     knowledge_base_b_ada_id = str(uuid.uuid4())
     with get_neo4j_session() as s:
         upsert_entity(
-            s, knowledge_base_a, ada_id, ExtractedEntity(name="Ada", type="Person", description="d"), "Ada summary"
+            s,
+            knowledge_base_a,
+            ada_id,
+            ExtractedEntity(name="Ada", type="Person", description="d"),
+            "Ada summary",
+            "Ada article",
         )
         upsert_entity(
-            s, knowledge_base_a, eng_id, ExtractedEntity(name="Engine", type="Thing", description="d"), "Engine summary"
+            s,
+            knowledge_base_a,
+            eng_id,
+            ExtractedEntity(name="Engine", type="Thing", description="d"),
+            "Engine summary",
+            "Engine article",
         )
         write_relationship(s, knowledge_base_a, ada_id, eng_id, "WORKED_ON", "job-1")
         upsert_entity(
-            s, knowledge_base_b, secret_id, ExtractedEntity(name="Secret", type="Person", description="d"), "x"
+            s, knowledge_base_b, secret_id, ExtractedEntity(name="Secret", type="Person", description="d"), "x", "x"
         )
         # Same name as knowledge_base_a's node, but in knowledge_base_b: proves full-text
         # `search` is knowledge_base-scoped, not just name-scoped.
@@ -76,6 +86,7 @@ def seeded():  # type: ignore[no-untyped-def]
             knowledge_base_b_ada_id,
             ExtractedEntity(name="Ada", type="Person", description="d"),
             "knowledge_base_b Ada",
+            "knowledge_base_b Ada article",
         )
 
     key = generate_api_key()

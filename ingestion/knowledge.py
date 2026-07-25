@@ -87,11 +87,13 @@ _ENTITY_QUALITY = (
 # splinters into one island per document. This pushes for both local links and shared anchors.
 _RELATIONSHIP_COMPLETENESS = (
     "Connect and anchor every entity. Emit each relationship the text supports so no entity is left "
-    "unconnected, and in particular tie each entity to the broader context that situates it: a venue "
-    "or landmark to its city, a person to their organization, an event to where and by whom it "
-    "happens, a local matter to its county or region. Favor linking to the places, organizations, and "
-    "governing bodies that recur across stories (cities, the county, the region, agencies), so the "
-    "graph connects through shared anchors instead of splintering into isolated clusters. Each "
+    "unconnected, and tie each entity to the broader context that situates it: a venue or landmark to "
+    "its city, a person to their organization, an event to where and by whom it happens. Build the "
+    "geographic backbone: place every town, city, and locale within the COUNTY and STATE that contains "
+    "it (name the county and state explicitly, from your own knowledge if the text omits them, and use "
+    "the exact same name every time — e.g. both Longview and Kelso resolve to 'Cowlitz County', "
+    "'Washington'). Because separate stories reuse these same county and state anchors, the graph "
+    "connects into one whole instead of splintering into an isolated cluster per story. Each "
     "relationship's source and target MUST be written exactly as the name of an entity in your "
     "entities list (same spelling)."
 )

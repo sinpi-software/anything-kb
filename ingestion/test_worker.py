@@ -9,6 +9,7 @@ from sqlalchemy import text as sqltext
 
 import worker
 from db import get_postgres_session
+from knowledge import MergeResult
 from models import IngestJob, JobStatus, KnowledgeBase, KnowledgeBaseConfig
 from relevance import RelevanceResult
 
@@ -35,7 +36,8 @@ def org_with_config():  # type: ignore[no-untyped-def]
         s.add(
             KnowledgeBaseConfig(
                 knowledge_base_id=knowledge_base.id,
-                relevance_prompt="anything",
+                interests="anything",
+                discover_types=True,
                 entity_types=[{"name": "Person", "description": ""}],
                 relationship_types=[{"name": "KNOWS", "description": ""}],
             )
@@ -69,10 +71,40 @@ def _status(job_id: str) -> str:
 @requires_pg
 def test_relevant_job_reaches_done(monkeypatch: pytest.MonkeyPatch, org_with_config) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(worker, "judge_relevance", lambda *a, **k: RelevanceResult(relevant=True, reason="ok"))
-    monkeypatch.setattr(worker, "merge_content", lambda *a, **k: None)
+    monkeypatch.setattr(
+        worker,
+        "merge_content",
+        lambda *a, **k: MergeResult(entities_created=0, entities_merged=0, relationships_created=0),
+    )
     job_id = _enqueue(org_with_config, "content")
     worker.process_job(job_id)
     assert _status(job_id) == "done"
+
+
+@requires_pg
+def test_new_relationship_type_is_persisted_to_config(monkeypatch: pytest.MonkeyPatch, org_with_config) -> None:  # type: ignore[no-untyped-def]
+    # A discover_types run that mints a new relationship type must grow the knowledge base's
+    # own vocabulary, not just the in-memory result — otherwise the next job never sees it.
+    monkeypatch.setattr(worker, "judge_relevance", lambda *a, **k: RelevanceResult(relevant=True, reason="ok"))
+    monkeypatch.setattr(
+        worker,
+        "merge_content",
+        lambda *a, **k: MergeResult(
+            entities_created=0,
+            entities_merged=0,
+            relationships_created=1,
+            new_relationship_types=[{"name": "Endorses", "description": "backs"}],
+        ),
+    )
+    job_id = _enqueue(org_with_config, "content")
+    worker.process_job(job_id)
+    assert _status(job_id) == "done"
+    with get_postgres_session() as s:
+        cfg = s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == org_with_config).one()
+        names = {t["name"] for t in cfg.relationship_types}
+        assert "Endorses" in names
+        # Pre-existing type is preserved, not clobbered.
+        assert "KNOWS" in names
 
 
 @requires_pg

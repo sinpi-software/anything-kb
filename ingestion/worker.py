@@ -52,19 +52,53 @@ def process_job(job_id: str) -> None:
             .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
             .one_or_none()
         )
-        relevance_prompt = cfg.relevance_prompt if cfg else ""
+        interests = cfg.interests if cfg else ""
+        discover = bool(cfg.discover_types) if cfg else False
         entity_types = list(cfg.entity_types) if cfg else []
         relationship_types = list(cfg.relationship_types) if cfg else []
 
     try:
-        verdict = judge_relevance(relevance_prompt, content)
+        verdict = judge_relevance(interests, content)
         if not verdict.relevant:
             _finalize(job_id, JobStatus.SKIPPED, relevance_reason=verdict.reason)
             return
-        merge_content(knowledge_base_id, content, entity_types, relationship_types, job_id)
+        result = merge_content(
+            knowledge_base_id, content, entity_types, relationship_types, job_id, interests=interests, discover=discover
+        )
+        _persist_new_types(knowledge_base_id, result.new_entity_types, result.new_relationship_types)
         _finalize(job_id, JobStatus.DONE, relevance_reason=verdict.reason)
     except Exception as exc:
         _record_failure(job_id, str(exc))
+
+
+def _persist_new_types(
+    knowledge_base_id: str, new_entities: list[dict[str, str]], new_rels: list[dict[str, str]]
+) -> None:
+    if not new_entities and not new_rels:
+        return
+    from knowledge import _norm_type
+
+    with get_postgres_session() as session:
+        cfg = (
+            session.query(KnowledgeBaseConfig)
+            .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
+            .one_or_none()
+        )
+        if cfg is None:
+            return
+
+        def merged(existing: list[dict[str, str]], additions: list[dict[str, str]]) -> list[dict[str, str]]:
+            seen = {_norm_type(t["name"]) for t in existing}
+            out = list(existing)
+            for t in additions:
+                if _norm_type(t["name"]) not in seen:
+                    seen.add(_norm_type(t["name"]))
+                    out.append({"name": t["name"], "description": t.get("description", "")})
+            return out
+
+        cfg.entity_types = merged(cfg.entity_types, new_entities)
+        cfg.relationship_types = merged(cfg.relationship_types, new_rels)
+        session.commit()
 
 
 def _finalize(job_id: str, status: JobStatus, relevance_reason: str | None = None) -> None:

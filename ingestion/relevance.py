@@ -18,15 +18,15 @@ class RelevanceError(RuntimeError):
     treating undecidable content as irrelevant and dropping it as `skipped`."""
 
 
-def build_relevance_messages(relevance_prompt: str, content: str) -> list[dict[str, str]]:
+def build_relevance_messages(interests: str, content: str) -> list[dict[str, str]]:
     system = (
-        f"{relevance_prompt}\n\nDecide whether the following content is relevant under that instruction. "
+        f"{interests}\n\nDecide whether the following content is relevant under that instruction. "
         "Return relevant=true or relevant=false and a brief reason."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
-def judge_relevance(relevance_prompt: str, content: str) -> RelevanceResult:
+def judge_relevance(interests: str, content: str) -> RelevanceResult:
     schema = {
         "type": "json_schema",
         "json_schema": {
@@ -36,7 +36,7 @@ def judge_relevance(relevance_prompt: str, content: str) -> RelevanceResult:
         },
     }
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client:
-        out = _chat(client, config.LLM_MODEL, build_relevance_messages(relevance_prompt, content), {}, schema)
+        out = _chat(client, config.LLM_MODEL, build_relevance_messages(interests, content), {}, schema)
     if out is None:
         raise RelevanceError("relevance check failed: empty LLM response")
     try:

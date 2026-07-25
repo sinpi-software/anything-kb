@@ -103,8 +103,10 @@ class KnowledgeBaseConfig(_BaseModel):
     knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", backref=backref("config", uselist=False))
     interests: Mapped[str] = mapped_column(TEXT, nullable=False)
     discover_types: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, server_default=true())
-    # Each type is {"name": str, "description": str}; the description guides the extractor.
-    # entity_types / relationship_types unchanged (JSONB list of {name, description, pinned?, banned?})
+    # Each type is {"name": str, "description": str, "pinned": bool, "banned": bool}; the
+    # description guides the extractor, pinned/banned let the user lock in or exclude a type.
+    # Typed loosely as dict[str, str] (matching knowledge.py/worker.py's existing convention) even
+    # though pinned/banned are bool at runtime — callers only ever read them via .get() in a truthy check.
     entity_types: Mapped[list[dict[str, str]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

@@ -16,7 +16,7 @@ router = APIRouter()
     responses={401: {"description": "Missing or invalid API key"}},
 )
 def put_config(body: ConfigRequest, knowledge_base_id: str = Depends(require_knowledge_base)) -> ConfigResponse:
-    """Upsert your knowledge_base's relevance prompt and the entity / relationship types the graph
+    """Upsert your knowledge_base's interests and the entity / relationship types the graph
     captures. Applies to content ingested after the change."""
     entity_types = [t.model_dump() for t in body.entity_types]
     relationship_types = [t.model_dump() for t in body.relationship_types]
@@ -29,19 +29,22 @@ def put_config(body: ConfigRequest, knowledge_base_id: str = Depends(require_kno
         if cfg is None:
             cfg = KnowledgeBaseConfig(
                 knowledge_base_id=knowledge_base_id,
-                relevance_prompt=body.relevance_prompt,
+                interests=body.interests,
+                discover_types=body.discover_types,
                 entity_types=entity_types,
                 relationship_types=relationship_types,
             )
             session.add(cfg)
         else:
-            cfg.relevance_prompt = body.relevance_prompt
+            cfg.interests = body.interests
+            cfg.discover_types = body.discover_types
             cfg.entity_types = entity_types
             cfg.relationship_types = relationship_types
         session.commit()
     return ConfigResponse(
         knowledge_base_id=knowledge_base_id,
-        relevance_prompt=body.relevance_prompt,
+        interests=body.interests,
+        discover_types=body.discover_types,
         entity_types=body.entity_types,
         relationship_types=body.relationship_types,
     )

@@ -85,7 +85,8 @@ def test_get_config_is_empty_for_fresh_account(client: TestClient) -> None:
         resp = client.get("/api/config")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["relevance_prompt"] == ""
+        assert body["interests"] == ""
+        assert body["discover_types"] is True
         assert body["entity_types"] == []
         assert body["relationship_types"] == []
     finally:
@@ -100,7 +101,8 @@ def test_put_then_get_roundtrips_config(client: TestClient) -> None:
         put = client.put(
             "/api/config",
             json={
-                "relevance_prompt": "Is this about AI?",
+                "interests": "Is this about AI?",
+                "discover_types": False,
                 "entity_types": [
                     {"name": "Person", "description": "a named human"},
                     {"name": "Organization", "description": "a company"},
@@ -111,12 +113,45 @@ def test_put_then_get_roundtrips_config(client: TestClient) -> None:
         )
         assert put.status_code == 200
         got = client.get("/api/config").json()
-        assert got["relevance_prompt"] == "Is this about AI?"
+        assert got["interests"] == "Is this about AI?"
+        assert got["discover_types"] is False
         assert got["entity_types"] == [
-            {"name": "Person", "description": "a named human"},
-            {"name": "Organization", "description": "a company"},
+            {"name": "Person", "description": "a named human", "pinned": False, "banned": False},
+            {"name": "Organization", "description": "a company", "pinned": False, "banned": False},
         ]
-        assert got["relationship_types"] == [{"name": "WORKS_AT", "description": ""}]
+        assert got["relationship_types"] == [{"name": "WORKS_AT", "description": "", "pinned": False, "banned": False}]
+    finally:
+        _purge_user(email)
+
+
+@requires_pg
+def test_put_config_preserves_pinned_and_banned_flags(client: TestClient) -> None:
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        put = client.put(
+            "/api/config",
+            json={
+                "interests": "Is this about AI?",
+                "discover_types": True,
+                "entity_types": [
+                    {"name": "Person", "description": "a named human", "pinned": True, "banned": False},
+                    {"name": "Spam", "description": "not relevant", "pinned": False, "banned": True},
+                ],
+                "relationship_types": [],
+            },
+            headers=LOCALHOST_ORIGIN,
+        )
+        assert put.status_code == 200
+        assert put.json()["entity_types"] == [
+            {"name": "Person", "description": "a named human", "pinned": True, "banned": False},
+            {"name": "Spam", "description": "not relevant", "pinned": False, "banned": True},
+        ]
+        got = client.get("/api/config").json()
+        assert got["entity_types"] == [
+            {"name": "Person", "description": "a named human", "pinned": True, "banned": False},
+            {"name": "Spam", "description": "not relevant", "pinned": False, "banned": True},
+        ]
     finally:
         _purge_user(email)
 
@@ -129,7 +164,8 @@ def test_put_config_sanitizes_and_drops_blank_types(client: TestClient) -> None:
         put = client.put(
             "/api/config",
             json={
-                "relevance_prompt": "keep\x00this",
+                "interests": "keep\x00this",
+                "discover_types": True,
                 "entity_types": [
                     {"name": "Person", "description": "sane\x00desc"},
                     {"name": "  ", "description": "blank name dropped"},
@@ -142,10 +178,10 @@ def test_put_config_sanitizes_and_drops_blank_types(client: TestClient) -> None:
         )
         assert put.status_code == 200
         body = put.json()
-        assert body["relevance_prompt"] == "keepthis"
+        assert body["interests"] == "keepthis"
         assert body["entity_types"] == [
-            {"name": "Person", "description": "sanedesc"},
-            {"name": "Place", "description": ""},
+            {"name": "Person", "description": "sanedesc", "pinned": False, "banned": False},
+            {"name": "Place", "description": "", "pinned": False, "banned": False},
         ]
     finally:
         _purge_user(email)
@@ -158,7 +194,7 @@ def test_put_config_is_403_when_email_unverified(client: TestClient) -> None:
         client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
         resp = client.put(
             "/api/config",
-            json={"relevance_prompt": "x", "entity_types": [], "relationship_types": []},
+            json={"interests": "x", "discover_types": True, "entity_types": [], "relationship_types": []},
             headers=LOCALHOST_ORIGIN,
         )
         assert resp.status_code == 403
@@ -174,7 +210,7 @@ def test_put_config_requires_csrf_origin(client: TestClient) -> None:
         del client.headers["origin"]
         resp = client.put(
             "/api/config",
-            json={"relevance_prompt": "x", "entity_types": [], "relationship_types": []},
+            json={"interests": "x", "discover_types": True, "entity_types": [], "relationship_types": []},
         )
         assert resp.status_code == 403
     finally:

@@ -85,7 +85,7 @@ class User(_AuthoredModel):
 class KnowledgeBase(_AuthoredModel):
     __tablename__ = "knowledge_bases"
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
-    charter: Mapped[str] = mapped_column(TEXT, nullable=True)
+    charter: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
 
 class JobStatus(Enum):

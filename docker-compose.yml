@@ -151,6 +151,53 @@ services:
       - ./ingestion:/app
     command: sh -c "uv sync --frozen --no-dev && exec python serve_worker.py"
 
+  neonews-migrate:
+    build: ./neonews
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.sample
+      - .env.local
+      - .env
+    environment:
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    volumes:
+      - ./neonews:/app
+    # Its own Alembic chain uses version_table="alembic_version_neonews", so the two
+    # chains in this one database cannot stamp over each other.
+    command: sh -c "uv sync --frozen --no-dev && exec alembic upgrade head"
+    restart: "no"
+
+  neonews-serve:
+    build: ./neonews
+    restart: unless-stopped
+    depends_on:
+      prefect:
+        condition: service_healthy
+      neonews-migrate:
+        condition: service_completed_successfully
+      ingestion-api:
+        condition: service_started
+    env_file:
+      - .env.sample
+      - .env.local
+      - .env
+    environment:
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      NEONEWS_ENGINE_URL: http://ingestion-api:8000
+      PREFECT_API_URL: http://prefect:4200/api
+      # Empty cron means registered but unscheduled. poll/ingest/draft each call
+      # OpenRouter, so a stack left running while editing would spend credits for
+      # nothing. Trigger runs from the UI instead.
+      NEONEWS_POLL_CRON: ""
+      NEONEWS_INGEST_CRON: ""
+      NEONEWS_JOBS_CRON: ""
+      NEONEWS_DRAFT_CRON: ""
+    volumes:
+      - ./neonews:/app
+    command: sh -c "uv sync --frozen --no-dev && exec python serve.py"
+
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy
   # Then open ./schemaspy/output/index.html

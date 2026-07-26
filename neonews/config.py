@@ -48,3 +48,18 @@ CONFIG_FILE = "neonews.toml"
 
 # --- Watermark keys (neonews_job_state.key) ---
 DRAFT_WATERMARK_KEY = "draft_issue"
+
+# --- Deployment schedules (serve.py) ---
+SCHEDULE_TZ_ENV = "NEONEWS_SCHEDULE_TZ"
+SCHEDULE_TZ_DEFAULT = "America/Los_Angeles"
+POLL_CRON_ENV = "NEONEWS_POLL_CRON"
+POLL_CRON_DEFAULT = "0 * * * *"
+INGEST_CRON_ENV = "NEONEWS_INGEST_CRON"
+INGEST_CRON_DEFAULT = "10 * * * *"
+JOBS_CRON_ENV = "NEONEWS_JOBS_CRON"
+JOBS_CRON_DEFAULT = "*/5 * * * *"
+DRAFT_CRON_ENV = "NEONEWS_DRAFT_CRON"
+DRAFT_CRON_DEFAULT = "30 7 * * *"
+# Flow runs executed concurrently by serve(). Each run is a subprocess.
+SERVE_CONCURRENCY_ENV = "NEONEWS_SERVE_CONCURRENCY"
+SERVE_CONCURRENCY_DEFAULT = 4

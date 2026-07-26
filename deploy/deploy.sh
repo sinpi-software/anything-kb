@@ -24,11 +24,16 @@ echo ">> build + push localhost:5000/anything-web:web-$TAG (RR8 SSR)"
 docker build -q -t "localhost:5000/anything-web:web-$TAG" "$HERE/../app" >/dev/null
 docker push "localhost:5000/anything-web:web-$TAG" >/dev/null
 
+echo ">> build + push localhost:5000/anything-neonews:$TAG"
+docker build -q -t "localhost:5000/anything-neonews:$TAG" "$HERE/../neonews" >/dev/null
+docker push "localhost:5000/anything-neonews:$TAG" >/dev/null
+
 echo ">> pulumi up ($STACK)"
 [ -d venv ] || python3 -m venv venv
 ./venv/bin/pip install -q -r requirements.txt
 pulumi stack select "$STACK"
 pulumi config set image "localhost:5000/anything-ingestion:$TAG"
 pulumi config set webImage "localhost:5000/anything-web:web-$TAG"
+pulumi config set neonewsImage "localhost:5000/anything-neonews:$TAG"
 pulumi up --yes --stack "$STACK"
 echo ">> deployed :$TAG"

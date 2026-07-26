@@ -33,18 +33,12 @@ SERVE_CONCURRENCY = int(getenv(config.SERVE_CONCURRENCY_ENV, str(config.SERVE_CO
 
 def deployments() -> list[Any]:
     return [
-        poll_sources.to_deployment(
-            name="poll-sources", schedules=[CronSchedule(cron=POLL_CRON, timezone=SCHEDULE_TZ)]
-        ),
+        poll_sources.to_deployment(name="poll-sources", schedules=[CronSchedule(cron=POLL_CRON, timezone=SCHEDULE_TZ)]),
         ingest_items.to_deployment(
             name="ingest-items", schedules=[CronSchedule(cron=INGEST_CRON, timezone=SCHEDULE_TZ)]
         ),
-        check_jobs.to_deployment(
-            name="check-jobs", schedules=[CronSchedule(cron=JOBS_CRON, timezone=SCHEDULE_TZ)]
-        ),
-        draft_issue.to_deployment(
-            name="draft-issue", schedules=[CronSchedule(cron=DRAFT_CRON, timezone=SCHEDULE_TZ)]
-        ),
+        check_jobs.to_deployment(name="check-jobs", schedules=[CronSchedule(cron=JOBS_CRON, timezone=SCHEDULE_TZ)]),
+        draft_issue.to_deployment(name="draft-issue", schedules=[CronSchedule(cron=DRAFT_CRON, timezone=SCHEDULE_TZ)]),
     ]
 
 

@@ -26,9 +26,7 @@ def test_sources_sharing_nothing_stay_separate() -> None:
 
 def test_transitive_sharing_merges_a_chain() -> None:
     """A-B share x, B-C share y: all three are one story."""
-    clusters = cluster_sources(
-        [_source("1", ["x"]), _source("2", ["x", "y"]), _source("3", ["y"])], max_sources=10
-    )
+    clusters = cluster_sources([_source("1", ["x"]), _source("2", ["x", "y"]), _source("3", ["y"])], max_sources=10)
     assert len(clusters) == 1
     assert {s["id"] for s in clusters[0].sources} == {"1", "2", "3"}
 

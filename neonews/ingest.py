@@ -7,12 +7,14 @@ re-fetching the page, while a dead link is fetched exactly once.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 import trafilatura
 from prefect import flow, get_run_logger
-from sqlalchemy import select
+from prefect.exceptions import MissingContextError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 import config
@@ -21,13 +23,26 @@ import net_guard as net_guard  # re-exported: tests patch ingest.net_guard.fetch
 from db import get_postgres_session
 from models import Item
 
+_fallback_logger = logging.getLogger("neonews.ingest")
+
+
+def _logger() -> logging.Logger | logging.LoggerAdapter[logging.Logger]:
+    """The Prefect run logger inside a flow, else a module logger. `extract_text` and
+    `submit` are called both from the flow and directly (tests, one-off runs), and
+    get_run_logger() raises outside a run context. Mirrors poll.py's `_logger()`."""
+    try:
+        return get_run_logger()
+    except MissingContextError:
+        return _fallback_logger
+
 
 def extract_text(url: str) -> str | None:
     """Readable page text, fetched through the SSRF guard. None on any failure —
     the caller falls back to the feed's own content."""
     try:
         html = net_guard.fetch(url)
-    except Exception:  # a bad link is normal; fall back, don't fail the run
+    except Exception as exc:  # a bad link is normal; fall back, don't fail the run
+        _logger().warning("extract_text failed for %s: %s", url, exc)
         return None
     extracted = trafilatura.extract(html.decode("utf-8", errors="replace"))
     return extracted or None
@@ -42,9 +57,12 @@ def prepare(session: Session, item: Item) -> None:
 
 
 def _metadata(item: Item) -> dict[str, Any]:
-    """What the engine stores on the Source node it creates for this item. It reads
-    `published_at` from here to date the node (worker.py), so send it when known."""
-    metadata: dict[str, Any] = {"label": item.title or item.url or "untitled"}
+    """What the engine stores on the Source node it creates for this item.
+    `worker.py`'s `process_job` reads `meta.get("source", ...)` for the label and
+    `meta.get("published_at", ...)` to date the node — both keys must match that
+    reader exactly, or every citation the engine produces from neonews content
+    renders as "untitled"."""
+    metadata: dict[str, Any] = {"source": item.title or item.url or "untitled"}
     if item.url:
         metadata["url"] = item.url
     if item.published_at:
@@ -63,6 +81,7 @@ def submit(session: Session, item: Item) -> bool:
     except Exception as exc:  # recorded and retried, not raised
         item.attempts += 1
         item.error = str(exc)[:500]
+        _logger().warning("submit failed for item %s (attempt %d): %s", item.id, item.attempts, exc)
         return False
 
 
@@ -85,8 +104,19 @@ def ingest_items() -> dict[str, int]:
             if submit(session, item):
                 submitted += 1
             session.commit()
-    logger.info("ingest: %d considered, %d submitted", len(pending), submitted)
-    return {"considered": len(pending), "submitted": submitted}
+        # Dead-lettered items fall out of the WHERE clause above entirely, so without
+        # this a pipeline with hundreds of dead-lettered items reports identically to
+        # an idle, healthy one. Surfaced, per the design, rather than re-driven forever.
+        dead_lettered = (
+            session.scalar(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
+            )
+            or 0
+        )
+    logger.info("ingest: %d considered, %d submitted, %d dead-lettered", len(pending), submitted, dead_lettered)
+    return {"considered": len(pending), "submitted": submitted, "dead_lettered": dead_lettered}
 
 
 if __name__ == "__main__":

@@ -32,6 +32,22 @@ Environment (repo-root `.env`):
 Edit `neonews.toml` to declare sources and the editorial beat. Config lives in git;
 runtime state lives in Postgres.
 
+### Known limitation: draft window truncation
+
+`draft-issue` asks the engine for every source since its watermark, newest first,
+capped at `SOURCES_QUERY_LIMIT` (the engine's own ceiling, `NODES_MAX_LIMIT = 500`).
+If a window ever holds more sources than that, the oldest ones in it are never
+returned and are permanently skipped — the engine has no `until` parameter or
+ascending-order option to page through the rest. When this happens, `draft-issue`
+logs an ERROR naming the uncovered window and returns `truncated: True`; nothing
+silently disappears. `SOURCES_QUERY_LIMIT` is already set to the engine's own
+ceiling (`NODES_MAX_LIMIT = 500`) and **cannot be raised further** — the engine
+hard-clamps at that value regardless of what's requested, so doing so would only
+disable the truncation check itself. Fixing this for real needs an engine-side
+change (`ingestion/`), which is out of scope here; the only mitigation available
+from this side is tightening the draft schedule (running it more often, on a
+smaller window) so fewer sources accumulate per run.
+
 ## Run
 
 ```bash
@@ -48,8 +64,21 @@ To run on a schedule, `uv run python serve.py` (needs `PREFECT_API_URL`).
 
 ## Test
 
+Postgres-backed tests run against their own database, never the operator's live one —
+create it once and point `NEONEWS_TEST_POSTGRES_URL` at it:
+
 ```bash
-uv run pytest        # Postgres-backed tests skip when Postgres is unreachable
+createdb -U ingestion -h localhost neonews_test
+NEONEWS_TEST_POSTGRES_URL=postgresql://ingestion:ingestion@localhost:5432/neonews_test \
+  uv run alembic upgrade head
+```
+
+`alembic upgrade head` on its own (no override) targets `NEONEWS_POSTGRES_URL` — the
+real database — so the explicit `NEONEWS_TEST_POSTGRES_URL` override above is what
+migrates `neonews_test` instead.
+
+```bash
+uv run pytest         # Postgres-backed tests FAIL (not skip) if neonews_test is unreachable
 uv run ruff check .
 uv run mypy .
 ```

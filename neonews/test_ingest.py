@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from datetime import UTC, datetime
@@ -6,7 +7,7 @@ from typing import Any
 os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete, func, select, text
 
 import config
 import engine
@@ -126,14 +127,18 @@ def test_submit_stores_the_job_id_and_sends_metadata(monkeypatch: pytest.MonkeyP
         assert refreshed is not None
         assert refreshed.job_id == "job-99"
     assert seen["text"] == "Full article body."
-    # The engine dates its Source nodes from published_at in job metadata.
+    # The engine dates its Source nodes from published_at in job metadata, and reads
+    # the label from the `source` key (worker.py: `meta.get("source", "")`) — not
+    # `label`, which the engine never looks at.
     assert seen["metadata"]["published_at"].startswith("2026-07-22T00:00:00")
     assert seen["metadata"]["url"] == "https://example.com/a"
-    assert seen["metadata"]["label"] == "A headline"
+    assert seen["metadata"]["source"] == "A headline"
 
 
 @requires_postgres
-def test_submit_failure_bumps_attempts_and_records_the_error(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
+def test_submit_failure_bumps_attempts_and_records_the_error(
+    monkeypatch: pytest.MonkeyPatch, item: str, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(
         ingest.engine, "post_content", lambda t, m: (_ for _ in ()).throw(engine.EngineError("HTTP 503"))
     )
@@ -141,7 +146,8 @@ def test_submit_failure_bumps_attempts_and_records_the_error(monkeypatch: pytest
         row = s.get(Item, item)
         assert row is not None
         row.full_text = "Body."
-        assert ingest.submit(s, row) is False
+        with caplog.at_level(logging.WARNING):
+            assert ingest.submit(s, row) is False
         s.commit()
         refreshed = s.get(Item, item)
         assert refreshed is not None
@@ -149,6 +155,8 @@ def test_submit_failure_bumps_attempts_and_records_the_error(monkeypatch: pytest
         assert refreshed.job_id is None
         assert refreshed.error is not None
         assert "503" in refreshed.error
+    # A failed submission must stay visible in the logs, not just in the DB row.
+    assert any("503" in record.message for record in caplog.records)
 
 
 @requires_postgres
@@ -171,11 +179,18 @@ def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.Monkey
     """
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
     label = f"cap-test-{item}"
+    sibling_label = f"cap-test-sibling-{item}"
 
     def fake_post(text_: str, metadata: dict[str, Any]) -> str:
-        if metadata.get("label") == label:
+        if metadata.get("source") == label:
             pytest.fail("should not submit: item is over the attempt cap")
-        return "job-sibling"  # the positive control, or some other pending row
+        if metadata.get("source") == sibling_label:
+            return "job-sibling"  # the positive control: this row IS owned by this test
+        # Any other row is a genuine pending item this test does not own. Stamping it
+        # with a fabricated job_id here would orphan it permanently (job_id IS NOT NULL
+        # skips it from `ingest`, and check-jobs 404s polling a non-UUID forever) — so
+        # fail loudly instead of quietly resolving someone else's row.
+        pytest.fail(f"fake_post called for a row this test does not own: {metadata}")
 
     monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
@@ -217,11 +232,14 @@ def test_ingest_flow_leaves_already_submitted_items_alone(monkeypatch: pytest.Mo
     sibling positive control is needed to rule out batch-size starvation."""
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
     label = f"submitted-test-{item}"
+    sibling_label = f"submitted-test-sibling-{item}"
 
     def fake_post(text_: str, metadata: dict[str, Any]) -> str:
-        if metadata.get("label") == label:
+        if metadata.get("source") == label:
             pytest.fail("should not resubmit: item already has a job_id")
-        return "job-sibling"
+        if metadata.get("source") == sibling_label:
+            return "job-sibling"  # the positive control: this row IS owned by this test
+        pytest.fail(f"fake_post called for a row this test does not own: {metadata}")
 
     monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
@@ -259,3 +277,35 @@ def test_extract_text_returns_none_on_a_blocked_url(monkeypatch: pytest.MonkeyPa
         ingest.net_guard, "fetch", lambda url, **kw: (_ for _ in ()).throw(net_guard.BlockedURLError("nope"))
     )
     assert ingest.extract_text("http://169.254.169.254/") is None
+
+
+def test_extract_text_logs_the_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """An egress change that breaks every fetch must stay visible in the logs, not
+    silently fall back to feed content with no trace."""
+    monkeypatch.setattr(
+        ingest.net_guard, "fetch", lambda url, **kw: (_ for _ in ()).throw(RuntimeError("fetch exploded"))
+    )
+    with caplog.at_level(logging.WARNING):
+        assert ingest.extract_text("https://example.com/x") is None
+    assert any("fetch exploded" in record.message for record in caplog.records)
+
+
+@requires_postgres
+def test_ingest_flow_counts_dead_lettered_items(item: str) -> None:
+    """Dead-lettered items fall out of the sweep's WHERE clause entirely, so without a
+    separate count a pipeline with hundreds of them reports identically to an idle,
+    healthy one — indistinguishable from healthy. The count must be surfaced."""
+    with get_postgres_session() as s:
+        before = s.scalar(
+            select(func.count())
+            .select_from(Item)
+            .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
+        ) or 0
+        row = s.get(Item, item)
+        assert row is not None
+        row.attempts = config.MAX_SUBMIT_ATTEMPTS
+        s.commit()
+
+    result = ingest.ingest_items()
+
+    assert result["dead_lettered"] >= before + 1

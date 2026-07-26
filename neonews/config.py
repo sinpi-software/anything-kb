@@ -1,5 +1,17 @@
 """Central configuration. Every tunable lives here or in a referenced env var."""
 
+import os
+
+import dotenv
+
+# Every module imports config, so loading here (before any env var is read) is what
+# makes the repo-root .env actually take effect — `uv run` does not load it itself.
+# Same files, same order, same override=False semantics as ingestion/main.py.
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env")
+dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.local")
+dotenv.load_dotenv(dotenv_path=f"{_project_root}/.env.sample")
+
 # --- Engine (the knowledge-graph API neonews consumes) ---
 ENGINE_URL_ENV = "NEONEWS_ENGINE_URL"
 ENGINE_URL_DEFAULT = "http://localhost:8000"
@@ -32,6 +44,12 @@ INGEST_BATCH_SIZE = 25
 MAX_SUBMIT_ATTEMPTS = 3
 # Job outcomes that end an item's lifecycle.
 TERMINAL_JOB_STATUSES = frozenset({"done", "skipped", "failed"})
+
+# --- Jobs ---
+# check-jobs items checked per run, oldest first. Unbounded, a long engine outage
+# (thousands of non-terminal rows, each a 30s-timeout GET) can occupy every serve()
+# worker slot with stalled check-jobs runs.
+JOBS_BATCH_SIZE = 200
 
 # --- Drafting ---
 # On the first run (no watermark), cover this much history.

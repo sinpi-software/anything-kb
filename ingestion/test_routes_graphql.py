@@ -59,12 +59,13 @@ def _purge_user(email: str) -> None:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    from graph_api import cookie_graphql_router
+    from graph_api import cookie_graphql_router, scoped_cookie_graphql_router
     from routes_auth import router as auth_router
 
     app = FastAPI()
     app.include_router(auth_router)
     app.include_router(cookie_graphql_router, prefix="/api/graphql")
+    app.include_router(scoped_cookie_graphql_router, prefix="/api/knowledge-bases/{kb_id}/graphql")
     yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
@@ -98,3 +99,21 @@ def test_graphql_runs_query_scoped_to_session_knowledge_base(client: TestClient)
         assert body["data"] == {"nodes": []}
     finally:
         _purge_user(email)
+
+
+@requires_stack
+def test_scoped_graphql_requires_membership(client: TestClient) -> None:
+    import uuid as _uuid
+
+    email = _unique_email()
+    try:
+        client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+        resp = client.post(
+            f"/api/knowledge-bases/{_uuid.uuid4()}/graphql",
+            json={"query": "{ nodes(limit: 1) { id } }"},
+            headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 404
+    finally:
+        _purge_user(email)
+

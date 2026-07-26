@@ -58,10 +58,12 @@ def _purge_user(email: str) -> None:
 def client() -> Iterator[TestClient]:
     from routes_auth import router as auth_router
     from routes_ingest import router as ingest_router
+    from routes_ingest import scoped_router as ingest_scoped_router
 
     app = FastAPI()
     app.include_router(auth_router)
     app.include_router(ingest_router)
+    app.include_router(ingest_scoped_router)
     yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
@@ -177,5 +179,37 @@ def test_job_status_404_for_garbage_id(client: TestClient) -> None:
         _register_and_verify(client, email)
         resp = client.get("/api/content/not-a-uuid")
         assert resp.status_code == 404
+    finally:
+        _purge_user(email)
+
+
+@requires_pg
+def test_reader_may_not_ingest_but_editor_may(client: TestClient) -> None:
+    """The ingest boundary pair: editor is the floor, reader is refused."""
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            membership = s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).one()
+            kb_id = str(membership.knowledge_base_id)
+            membership.role = "reader"
+            s.commit()
+        refused = client.post(
+            f"/api/knowledge-bases/{kb_id}/content", json={"text": "hi"}, headers=LOCALHOST_ORIGIN
+        )
+        assert refused.status_code == 404
+
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).one().role = "editor"
+            s.commit()
+        allowed = client.post(
+            f"/api/knowledge-bases/{kb_id}/content", json={"text": "hi"}, headers=LOCALHOST_ORIGIN
+        )
+        assert allowed.status_code == 202
     finally:
         _purge_user(email)

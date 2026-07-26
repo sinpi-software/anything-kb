@@ -47,6 +47,25 @@ def _llm_client() -> OpenRouter:
     return OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV])
 
 
+def _oldest_ingested_at(rows: list[dict[str, Any]]) -> datetime:
+    """The oldest `ingestedAt` (falling back to `publishedAt`) among `rows`. Used only
+    when the engine's LIMIT truncated the window: advancing the watermark to run_start
+    would silently drop every source past the limit, so it advances only past what was
+    actually seen, and the remainder is picked up next run."""
+    timestamps = []
+    for row in rows:
+        raw = row.get("ingestedAt") or row.get("publishedAt")
+        if not raw:
+            continue
+        dt = datetime.fromisoformat(str(raw))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        timestamps.append(dt)
+    if not timestamps:
+        raise ValueError("truncated window but no row carries ingestedAt/publishedAt")
+    return min(timestamps)
+
+
 @task(name="write-story")
 def write_story_task(beat: str, cluster: Cluster) -> Story:
     return write_story(_llm_client(), beat, cluster)
@@ -80,11 +99,25 @@ def draft_issue() -> dict[str, Any]:
         except Exception as exc:  # one failed story shouldn't sink the issue
             logger.warning("draft: a cluster failed and was dropped: %s", exc)
 
+    # A genuinely empty window (clusters == 0) is not the same as a non-empty window
+    # where every cluster's LLM call failed. Conflating them — writing "No new stories"
+    # and advancing anyway — would silently and permanently drop those sources: the
+    # exact "skipped window" the module's own docstring calls unrecoverable.
+    if clusters and not stories:
+        raise RuntimeError(f"draft: all {len(clusters)} clusters failed; window not covered, watermark not advanced")
+
     markdown = assemble_issue(stories, generated_at=run_start, covers_since=since)
     output_dir = Path(config.OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{run_start.strftime('%Y-%m-%d-%H%M')}.md"
     path.write_text(markdown, encoding="utf-8")
+
+    # The engine clamps `rows` at SOURCES_QUERY_LIMIT, newest first. If it truncated
+    # the window, advancing to run_start would skip everything past the limit — advance
+    # only to the oldest source actually seen instead, so the rest is retried next run.
+    watermark = run_start
+    if len(rows) == config.SOURCES_QUERY_LIMIT:
+        watermark = _oldest_ingested_at(rows)
 
     # Only now is the window genuinely covered.
     with get_postgres_session() as session:
@@ -96,7 +129,7 @@ def draft_issue() -> dict[str, Any]:
                 story_count=len(stories),
             )
         )
-        set_watermark(session, run_start)
+        set_watermark(session, watermark)
         session.commit()
 
     logger.info("draft: wrote %d stories to %s", len(stories), path)

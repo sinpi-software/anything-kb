@@ -5,7 +5,8 @@ by containerd as localhost:5000 via registries.yaml). So this program does NOT
 manage a registry or node config — the image is built+pushed out of band (see
 README) and referenced here by tag. Pulumi only deploys the workloads:
 
-  namespace + secrets → postgres + neo4j → migrate (alembic) → api + worker
+  namespace + secrets → postgres + neo4j → migrate (alembic) → prefect → api + worker
+  → neonews (only if neonewsImage and neonewsEngineApiKey are both configured)
   → cloudflared (only if a tunnel token is configured)
 
 Runs against the cluster via KUBECONFIG (fetch the node's /etc/rancher/k3s/k3s.yaml).
@@ -176,15 +177,24 @@ migrate = k8s.batch.v1.Job(
 
 # --- prefect ---------------------------------------------------------------
 # Prefect gets its own database inside the existing postgres pod (home lab: one
-# server, several databases). Idempotent: `pulumi up` re-runs this Job, so the
-# CREATE is guarded by a catalog check rather than relying on IF NOT EXISTS,
-# which CREATE DATABASE does not support.
+# server, several databases). By itself this Job's spec is entirely constant, so
+# once it has succeeded once `pulumi up` sees no diff and never re-runs it — that
+# is NOT idempotent-by-reapplication, it is "runs exactly once ever". The
+# `deploy/image` pod-template annotation below pins the engine's image tag, which
+# changes on every deploy, so Pulumi sees a diff on this (immutable) Job spec and
+# replaces it each time — the same mechanism that already makes the `migrate` Job
+# above re-run on every deploy. Re-running is safe because the CREATE itself is
+# guarded by a catalog check rather than relying on IF NOT EXISTS, which CREATE
+# DATABASE does not support.
 prefect_db_init = k8s.batch.v1.Job(
     "prefect-db-init",
     metadata=meta("prefect-db-init"),
     spec={
         "backoffLimit": 5,
         "template": {
+            # Forces Pulumi to see a diff (and replace this Job) on every deploy —
+            # see the comment above. The value itself is irrelevant to the Job.
+            "metadata": {"annotations": {"deploy/image": image}},
             "spec": {
                 "restartPolicy": "Never",
                 "containers": [
@@ -204,7 +214,7 @@ prefect_db_init = k8s.batch.v1.Job(
                         ],
                     }
                 ],
-            }
+            },
         },
     },
     opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, db_secret]),
@@ -350,85 +360,103 @@ api_svc = k8s.core.v1.Service(
 
 
 # --- neonews (the automated newsroom; an external consumer of the engine API) ---
-neonews_image = cfg.require("neonewsImage")  # e.g. localhost:5000/anything-neonews:<tag>
+# Both optional, fail-open — mirrors the cloudflared block below. `pulumi up`
+# must succeed even when neonews isn't configured yet (nothing sets these by
+# default; deploy.sh sets neonewsImage but the key must be configured by hand), so
+# a missing value skips neonews entirely with a warning rather than aborting the
+# whole program before anything else is created or updated.
+neonews_image = cfg.get("neonewsImage")  # e.g. localhost:5000/anything-neonews:<tag>
 # Which knowledge base neonews reads and writes is decided by WHICH key you set here.
-neonews_engine_api_key = cfg.require_secret("neonewsEngineApiKey")
+neonews_engine_api_key = cfg.get_secret("neonewsEngineApiKey")
 
-# Keys are exactly the env var names neonews/config.py reads.
-neonews_secret = k8s.core.v1.Secret(
-    "neonews-secret",
-    metadata=meta("neonews-secret"),
-    string_data={
-        "NEONEWS_POSTGRES_URL": pulumi.Output.concat(
-            "postgresql://ingestion:", pg_password, "@postgres:5432/ingestion"
-        ),
-        "NEONEWS_ENGINE_URL": "http://ingestion-api",
-        "NEONEWS_ENGINE_API_KEY": neonews_engine_api_key,
-        "NEONEWS_OPENROUTER_API_KEY": openrouter_key,
-        "PREFECT_API_URL": "http://prefect:4200/api",
-    },
-    opts=ns_opts,
-)
-
-# neonews owns its own Alembic chain (version_table alembic_version_neonews) in the
-# same database, so this cannot collide with the engine's migrate Job.
-neonews_migrate = k8s.batch.v1.Job(
-    "neonews-migrate",
-    metadata=meta("neonews-migrate"),
-    spec={
-        "backoffLimit": 5,
-        "template": {
-            "spec": {
-                "restartPolicy": "Never",
-                "containers": [
-                    {
-                        "name": "migrate",
-                        "image": neonews_image,
-                        "imagePullPolicy": "Always",
-                        "command": ["alembic", "upgrade", "head"],
-                        "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
-                    }
-                ],
-            }
+if neonews_image is not None and neonews_engine_api_key is not None:
+    # Keys are exactly the env var names neonews/config.py reads.
+    neonews_secret = k8s.core.v1.Secret(
+        "neonews-secret",
+        metadata=meta("neonews-secret"),
+        string_data={
+            "NEONEWS_POSTGRES_URL": pulumi.Output.concat(
+                "postgresql://ingestion:", pg_password, "@postgres:5432/ingestion"
+            ),
+            "NEONEWS_ENGINE_URL": "http://ingestion-api",
+            "NEONEWS_ENGINE_API_KEY": neonews_engine_api_key,
+            "NEONEWS_OPENROUTER_API_KEY": openrouter_key,
+            "PREFECT_API_URL": "http://prefect:4200/api",
         },
-    },
-    opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, neonews_secret]),
-)
+        opts=ns_opts,
+    )
 
-# serve.py registers the four flow deployments and executes the runs they schedule —
-# no work pool or custom worker image needed. Gated on the migration so neonews can
-# never start against an unmigrated schema, and on Prefect so registration has an API
-# to talk to. If Prefect is unreachable the pod crashloops, which is the honest failure.
-neonews_serve = k8s.apps.v1.Deployment(
-    "neonews-serve",
-    metadata=meta("neonews-serve"),
-    spec={
-        "replicas": 1,
-        # Exactly one process may register these deployments; two would reconcile
-        # the same schedules against each other.
-        "strategy": {"type": "Recreate"},
-        "selector": {"matchLabels": {"app": "neonews-serve"}},
-        "template": {
-            "metadata": {"labels": {"app": "neonews-serve"}},
-            "spec": {
-                "containers": [
-                    {
-                        "name": "neonews-serve",
-                        "image": neonews_image,
-                        "imagePullPolicy": "Always",
-                        "command": ["python", "serve.py"],
-                        "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
-                        "resources": {
-                            "requests": {"cpu": "100m", "memory": "256Mi"},
-                            "limits": {"memory": "1Gi"},
-                        },
-                    }
-                ],
+    # neonews owns its own Alembic chain (version_table alembic_version_neonews) in
+    # the same database, so this cannot collide with the engine's migrate Job.
+    neonews_migrate = k8s.batch.v1.Job(
+        "neonews-migrate",
+        metadata=meta("neonews-migrate"),
+        spec={
+            "backoffLimit": 5,
+            "template": {
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "migrate",
+                            "image": neonews_image,
+                            "imagePullPolicy": "Always",
+                            "command": ["alembic", "upgrade", "head"],
+                            "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                        }
+                    ],
+                }
             },
         },
-    },
-    opts=pulumi.ResourceOptions(depends_on=[neonews_migrate, prefect_deploy, api_svc]),
-)
+        opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, neonews_secret]),
+    )
+
+    # serve.py registers the four flow deployments and executes the runs they
+    # schedule — no work pool or custom worker image needed. Gated on the migration
+    # so neonews can never start against an unmigrated schema, and on Prefect so
+    # registration has an API to talk to. If Prefect is unreachable the pod
+    # crashloops, which is the honest failure.
+    neonews_serve = k8s.apps.v1.Deployment(
+        "neonews-serve",
+        metadata=meta("neonews-serve"),
+        spec={
+            "replicas": 1,
+            # Exactly one process may register these deployments; two would
+            # reconcile the same schedules against each other.
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": {"app": "neonews-serve"}},
+            "template": {
+                "metadata": {"labels": {"app": "neonews-serve"}},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "neonews-serve",
+                            "image": neonews_image,
+                            "imagePullPolicy": "Always",
+                            "command": ["python", "serve.py"],
+                            "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                            "resources": {
+                                "requests": {"cpu": "100m", "memory": "256Mi"},
+                                "limits": {"memory": "1Gi"},
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+        opts=pulumi.ResourceOptions(depends_on=[neonews_migrate, prefect_deploy, api_svc]),
+    )
+else:
+    missing = [
+        name
+        for name, value in (("neonewsImage", neonews_image), ("neonewsEngineApiKey", neonews_engine_api_key))
+        if value is None
+    ]
+    pulumi.log.warn(
+        "neonews is not deployed: " + ", ".join(missing) + " unset. Set with "
+        "`pulumi config set neonewsImage <ref>` and "
+        "`pulumi config set --secret neonewsEngineApiKey <key>` to enable it."
+    )
 
 
 # --- web frontend (React Router 8 SSR app; Node server) ---

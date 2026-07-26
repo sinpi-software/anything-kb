@@ -11,7 +11,8 @@ tag. Pulumi only deploys the workloads.
 
 ```
 build+push image (on the node) → pulumi up:
-  namespace + secrets → postgres + neo4j → migrate (alembic) → api + worker → [cloudflared]
+  namespace + secrets → postgres + neo4j → migrate (alembic) → prefect → api + worker
+  → [neonews] → [cloudflared]
 ```
 
 ## One-time prerequisites
@@ -59,9 +60,14 @@ pulumi config set --secret openrouterApiKey "sk-or-..."                 # or pul
   `PREFECT_UI_API_URL`; the UI is browser-side, so this must be an address your
   browser can reach, not the in-cluster service name. Prefect has no auth — keep
   this on the LAN, never behind the tunnel.
-- `neonewsImage` (required) — set by `deploy.sh`, e.g. `localhost:5000/anything-neonews:<tag>`.
-- `neonewsEngineApiKey` (required, secret) — an engine API key. **Which key you set
+- `neonewsImage` (optional) — set by `deploy.sh`, e.g. `localhost:5000/anything-neonews:<tag>`.
+- `neonewsEngineApiKey` (optional, secret) — an engine API key. **Which key you set
   decides which knowledge base neonews ingests into and drafts from.**
+- neonews is **fail-open**: if either of the two above is unset, `pulumi up`
+  still succeeds and deploys everything else — it just skips the neonews secret,
+  migration Job, and serve Deployment, logging a `pulumi.log.warn` that says so. A
+  bare `pulumi up` (no `neonewsImage`/`neonewsEngineApiKey` set) is safe; it simply
+  does not deploy neonews. Set both to enable it.
 
 ## 3. Deploy
 

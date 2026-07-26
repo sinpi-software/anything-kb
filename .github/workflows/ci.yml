@@ -51,6 +51,19 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
+  neonews-image:
+    name: build check (Docker image)
+    needs: neonews
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Validate the image builds; the real build+push happens on the node during
+      # deploy.sh, before `pulumi up` in a `set -e` script — a build failure here
+      # (e.g. lockfile drift) means neither the neonews nor the engine change
+      # reaches the cluster, so catch it in CI first.
+      - name: Build neonews image (no push)
+        run: docker build -t anything-neonews:ci neonews
+
   test:
     name: test + lint + type (ingestion)
     runs-on: ubuntu-latest
@@ -111,6 +124,17 @@ jobs:
       # Validate the image builds; the real build+push happens on the node during deploy.
       - name: Build ingestion image (no push)
         run: docker build -t anything-ingestion:ci ingestion
+
+  deploy-syntax:
+    name: syntax check (deploy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No cluster access, no secrets, no Pulumi CLI — just catch a typo in the
+      # Pulumi program before it reaches a real deploy (nothing else in CI ever
+      # evaluates deploy/__main__.py).
+      - name: Parse deploy/__main__.py
+        run: python3 -c "import ast; ast.parse(open('deploy/__main__.py').read())"
 
   web:
     name: typecheck + build (web)

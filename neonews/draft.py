@@ -91,20 +91,24 @@ def draft_issue() -> dict[str, Any]:
 
     # The engine returns sources newest-first and clamps at SOURCES_QUERY_LIMIT
     # (graph_read.py: `ORDER BY s.ingested_at DESC LIMIT $limit`). A full page means
-    # the window held more than the limit: the undrafted remainder is *older* than the
+    # the window held at least the limit: the undrafted remainder is *older* than the
     # oldest source we got back, i.e. strictly older than `since` is about to become.
-    # There is no engine-side `until` or ascending order to page through it, so that
-    # remainder is simply lost — permanently skipped, never retried. Advancing to
-    # run_start (rather than to the oldest source seen) avoids the worse alternative:
+    # `>=` rather than `==`: SOURCES_QUERY_LIMIT is already pinned at the engine's own
+    # ceiling (config.py asserts this), so it cannot be raised further to "fix" a
+    # truncated run — `==` would let a larger local value silently defeat this check
+    # the moment the engine's own clamp became the binding one instead of ours. There
+    # is no engine-side `until` or ascending order to page through the remainder, so
+    # it is simply lost — permanently skipped, never retried. Advancing to run_start
+    # (rather than to the oldest source seen) avoids the worse alternative:
     # re-clustering and re-writing the same sources — and paying for the LLM calls
     # again — every truncated run. Make the loss loud instead.
-    truncated = len(rows) == config.SOURCES_QUERY_LIMIT
+    truncated = len(rows) >= config.SOURCES_QUERY_LIMIT
     if truncated:
         oldest_returned = _oldest_ingested_at(rows)
         logger.error(
-            "draft: TRUNCATED — %d sources returned (SOURCES_QUERY_LIMIT=%d); the window %s to %s could not "
-            "be covered and is now permanently skipped. Raise SOURCES_QUERY_LIMIT or tighten the draft "
-            "schedule.",
+            "draft: TRUNCATED — %d sources returned (SOURCES_QUERY_LIMIT=%d, already at the engine's "
+            "ceiling); the window %s to %s could not be covered and is now permanently skipped. Tighten "
+            "the draft schedule (run more often, on a smaller window) so fewer sources accumulate per run.",
             len(rows),
             config.SOURCES_QUERY_LIMIT,
             since.isoformat(),

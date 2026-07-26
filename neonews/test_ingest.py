@@ -4,36 +4,46 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
 
+import config
+
 # Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
-# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
-# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
-# would lose to whichever test module's `import config` happened to run first in this
-# session and already populated it from .env; assignment can't lose that race.
-os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
-    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
-)
+# assignment rather than setdefault: the `import config` just above already ran its
+# repo-root .env loading, and .env.sample sets NEONEWS_POSTGRES_URL to the operator's
+# live database. Plain assignment (not setdefault) unconditionally overwrites whatever
+# dotenv set, so the test suite can never end up pointed at the live database — the
+# semantics of `=` vs `setdefault` are what protect this, not import order.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(config.POSTGRES_TEST_URL_ENV, config.POSTGRES_TEST_URL_DEFAULT)
 
 import pytest
 from sqlalchemy import delete, func, select, text
 
-import config
 import engine
 import ingest
 from db import get_postgres_session
 from models import Item, Source
 
 
-def _postgres_available() -> bool:
+def _require_test_postgres() -> None:
+    """The Postgres-backed tests in this module need neonews_test — the two
+    extract_text tests below don't touch the database and are unaffected either way.
+    A missing/unmigrated database must FAIL the suite, not silently skip it — a skip
+    here means the one-time setup documented in README.md was never done, not that
+    the environment legitimately lacks Postgres. Reported as a clean pass, that's
+    exactly the failure mode this project has fought all the way through."""
     try:
         with get_postgres_session() as s:
             s.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(
+            f"neonews_test is not reachable at NEONEWS_POSTGRES_URL={os.environ.get('NEONEWS_POSTGRES_URL')!r}. "
+            "Create and migrate it once:\n"
+            "  createdb -U ingestion -h localhost neonews_test\n"
+            "  NEONEWS_TEST_POSTGRES_URL=postgresql://ingestion:ingestion@localhost:5432/neonews_test "
+            "uv run alembic upgrade head"
+        ) from exc
 
 
-_HAS_POSTGRES = _postgres_available()
-requires_postgres = pytest.mark.skipif(not _HAS_POSTGRES, reason="Postgres not reachable")
+_require_test_postgres()
 
 
 @pytest.fixture
@@ -69,7 +79,6 @@ def item() -> Generator[str, None, None]:
         s.commit()
 
 
-@requires_postgres
 def test_prepare_stores_extracted_text(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Full article body.")
     with get_postgres_session() as s:
@@ -82,7 +91,6 @@ def test_prepare_stores_extracted_text(monkeypatch: pytest.MonkeyPatch, item: st
         assert refreshed.full_text == "Full article body."
 
 
-@requires_postgres
 def test_prepare_stamps_extracted_at_even_when_extraction_yields_nothing(
     monkeypatch: pytest.MonkeyPatch, item: str
 ) -> None:
@@ -99,7 +107,6 @@ def test_prepare_stamps_extracted_at_even_when_extraction_yields_nothing(
         assert refreshed.full_text == "Feed body."  # fell back to the feed's own content
 
 
-@requires_postgres
 def test_prepare_falls_back_to_feed_content_when_there_is_no_url(
     monkeypatch: pytest.MonkeyPatch, item: str
 ) -> None:
@@ -115,7 +122,6 @@ def test_prepare_falls_back_to_feed_content_when_there_is_no_url(
         assert refreshed.full_text == "Feed body."
 
 
-@requires_postgres
 def test_submit_stores_the_job_id_and_sends_metadata(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     seen: dict[str, Any] = {}
 
@@ -142,7 +148,6 @@ def test_submit_stores_the_job_id_and_sends_metadata(monkeypatch: pytest.MonkeyP
     assert seen["metadata"]["source"] == "A headline"
 
 
-@requires_postgres
 def test_submit_failure_bumps_attempts_and_records_the_error(
     monkeypatch: pytest.MonkeyPatch, item: str, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -166,7 +171,6 @@ def test_submit_failure_bumps_attempts_and_records_the_error(
     assert any("503" in record.message for record in caplog.records)
 
 
-@requires_postgres
 def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """The cap is the guard against re-driving a broken item forever — the failure
     mode that, in the prior codebase, drained the account.
@@ -231,7 +235,6 @@ def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.Monkey
         assert sibling_refreshed.job_id is not None  # positive control: the sweep did reach this batch
 
 
-@requires_postgres
 def test_ingest_flow_leaves_already_submitted_items_alone(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """Proves the `job_id IS NULL` half of the sweep: an item that already has a
     job_id is never re-submitted. See the cap test above for why the fail-trap is
@@ -297,7 +300,6 @@ def test_extract_text_logs_the_failure(monkeypatch: pytest.MonkeyPatch, caplog: 
     assert any("fetch exploded" in record.message for record in caplog.records)
 
 
-@requires_postgres
 def test_ingest_flow_counts_dead_lettered_items(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """Dead-lettered items fall out of the sweep's WHERE clause entirely, so without a
     separate count a pipeline with hundreds of them reports identically to an idle,

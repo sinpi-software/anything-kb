@@ -1,14 +1,15 @@
 import os
 from collections.abc import Callable, Generator
 
+import config
+
 # Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
-# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
-# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
-# would lose to whichever test module's `import config` happened to run first in this
-# session and already populated it from .env; assignment can't lose that race.
-os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
-    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
-)
+# assignment rather than setdefault: the `import config` just above already ran its
+# repo-root .env loading, and .env.sample sets NEONEWS_POSTGRES_URL to the operator's
+# live database. Plain assignment (not setdefault) unconditionally overwrites whatever
+# dotenv set, so the test suite can never end up pointed at the live database — the
+# semantics of `=` vs `setdefault` are what protect this, not import order.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(config.POSTGRES_TEST_URL_ENV, config.POSTGRES_TEST_URL_DEFAULT)
 
 import pytest
 from sqlalchemy import delete, text
@@ -19,16 +20,26 @@ from db import get_postgres_session
 from models import Item, Source
 
 
-def _postgres_available() -> bool:
+def _require_test_postgres() -> None:
+    """Every test in this module needs neonews_test. A missing/unmigrated database
+    must FAIL the suite, not silently skip it — a skip here means the one-time setup
+    documented in README.md was never done, not that the environment legitimately
+    lacks Postgres. Reported as a clean pass, that's exactly the failure mode this
+    project has fought all the way through."""
     try:
         with get_postgres_session() as s:
             s.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(
+            f"neonews_test is not reachable at NEONEWS_POSTGRES_URL={os.environ.get('NEONEWS_POSTGRES_URL')!r}. "
+            "Create and migrate it once:\n"
+            "  createdb -U ingestion -h localhost neonews_test\n"
+            "  NEONEWS_TEST_POSTGRES_URL=postgresql://ingestion:ingestion@localhost:5432/neonews_test "
+            "uv run alembic upgrade head"
+        ) from exc
 
 
-requires_postgres = pytest.mark.skipif(not _postgres_available(), reason="Postgres not reachable")
+_require_test_postgres()
 
 
 @pytest.fixture
@@ -71,7 +82,6 @@ def make_item() -> Generator[Callable[..., tuple[str, str]], None, None]:
         s.commit()
 
 
-@requires_postgres
 def test_records_a_terminal_status(monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]) -> None:
     item_id, job_id = make_item("pending")
 
@@ -92,7 +102,6 @@ def test_records_a_terminal_status(monkeypatch: pytest.MonkeyPatch, make_item: C
         assert row.job_status == "done"
 
 
-@requires_postgres
 def test_skipped_is_terminal_and_normal(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:
@@ -114,7 +123,6 @@ def test_skipped_is_terminal_and_normal(
         assert row.error is None
 
 
-@requires_postgres
 def test_does_not_repoll_a_terminal_item(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:
@@ -141,7 +149,6 @@ def test_does_not_repoll_a_terminal_item(
         assert row.job_status == "done"  # unchanged
 
 
-@requires_postgres
 def test_check_jobs_respects_the_batch_size(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:
@@ -158,7 +165,6 @@ def test_check_jobs_respects_the_batch_size(
     assert result["checked"] == 0
 
 
-@requires_postgres
 def test_a_failing_status_call_does_not_sink_the_run(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:

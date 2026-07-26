@@ -2,14 +2,15 @@ import os
 from collections.abc import Generator
 from datetime import UTC, datetime
 
+import config
+
 # Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
-# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
-# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
-# would lose to whichever test module's `import config` happened to run first in this
-# session and already populated it from .env; assignment can't lose that race.
-os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
-    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
-)
+# assignment rather than setdefault: the `import config` just above already ran its
+# repo-root .env loading, and .env.sample sets NEONEWS_POSTGRES_URL to the operator's
+# live database. Plain assignment (not setdefault) unconditionally overwrites whatever
+# dotenv set, so the test suite can never end up pointed at the live database — the
+# semantics of `=` vs `setdefault` are what protect this, not import order.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(config.POSTGRES_TEST_URL_ENV, config.POSTGRES_TEST_URL_DEFAULT)
 
 import pytest
 from sqlalchemy import delete, select, text
@@ -21,16 +22,26 @@ from sources import Item as SourceItem
 from sources import SourceSpec
 
 
-def _postgres_available() -> bool:
+def _require_test_postgres() -> None:
+    """Every test in this module needs neonews_test. A missing/unmigrated database
+    must FAIL the suite, not silently skip it — a skip here means the one-time setup
+    documented in README.md was never done, not that the environment legitimately
+    lacks Postgres. Reported as a clean pass, that's exactly the failure mode this
+    project has fought all the way through."""
     try:
         with get_postgres_session() as s:
             s.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(
+            f"neonews_test is not reachable at NEONEWS_POSTGRES_URL={os.environ.get('NEONEWS_POSTGRES_URL')!r}. "
+            "Create and migrate it once:\n"
+            "  createdb -U ingestion -h localhost neonews_test\n"
+            "  NEONEWS_TEST_POSTGRES_URL=postgresql://ingestion:ingestion@localhost:5432/neonews_test "
+            "uv run alembic upgrade head"
+        ) from exc
 
 
-requires_postgres = pytest.mark.skipif(not _postgres_available(), reason="Postgres not reachable")
+_require_test_postgres()
 
 
 def _spec(suffix: str) -> SourceSpec:
@@ -61,7 +72,6 @@ def source_ids() -> Generator[list[str], None, None]:
         s.commit()
 
 
-@requires_postgres
 def test_upsert_sources_is_idempotent(source_ids: list[str]) -> None:
     spec = _spec(os.urandom(4).hex())
     with get_postgres_session() as s:
@@ -73,7 +83,6 @@ def test_upsert_sources_is_idempotent(source_ids: list[str]) -> None:
     assert first == second
 
 
-@requires_postgres
 def test_store_items_returns_only_newly_inserted_rows(source_ids: list[str]) -> None:
     with get_postgres_session() as s:
         source_id = poll.upsert_sources(s, [_spec(os.urandom(4).hex())])[0]
@@ -87,7 +96,6 @@ def test_store_items_returns_only_newly_inserted_rows(source_ids: list[str]) -> 
     assert len(second) == 1
 
 
-@requires_postgres
 def test_poll_source_records_success_and_resets_failure_count(
     monkeypatch: pytest.MonkeyPatch, source_ids: list[str]
 ) -> None:
@@ -107,7 +115,6 @@ def test_poll_source_records_success_and_resets_failure_count(
         assert refreshed.last_polled_at is not None
 
 
-@requires_postgres
 def test_poll_source_isolates_a_failing_source(monkeypatch: pytest.MonkeyPatch, source_ids: list[str]) -> None:
     """One bad feed bumps its failure count and returns 0 — it must not raise."""
 
@@ -128,7 +135,6 @@ def test_poll_source_isolates_a_failing_source(monkeypatch: pytest.MonkeyPatch, 
         assert refreshed.failure_count == 1
 
 
-@requires_postgres
 def test_poll_source_skips_items_with_no_text(monkeypatch: pytest.MonkeyPatch, source_ids: list[str]) -> None:
     """An entry with no body is nothing to submit; storing it would permanently
     consume its dedup key and mask the real item if the feed later fills it in."""
@@ -143,7 +149,6 @@ def test_poll_source_skips_items_with_no_text(monkeypatch: pytest.MonkeyPatch, s
         assert poll.poll_source(s, source) == 0
 
 
-@requires_postgres
 def test_deactivate_removed_sources_turns_off_rows_missing_from_config(source_ids: list[str]) -> None:
     """Config is authoritative: an operator who deletes a feed from neonews.toml must
     see it stop being polled, not keep running forever because nothing ever clears
@@ -174,7 +179,6 @@ def test_deactivate_removed_sources_turns_off_rows_missing_from_config(source_id
     assert deactivated >= 1
 
 
-@requires_postgres
 def test_deactivate_removed_sources_leaves_active_config_sources_alone(source_ids: list[str]) -> None:
     spec = _spec(os.urandom(4).hex())
     with get_postgres_session() as s:

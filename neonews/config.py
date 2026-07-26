@@ -64,6 +64,15 @@ DEFAULT_LOOKBACK_HOURS = 24
 # engine has no `until`/ascending-order parameter, so a truncated window's remainder
 # is simply lost (see draft.py's truncation handling) rather than picked up next run.
 SOURCES_QUERY_LIMIT = 500
+# The engine hard-clamps `sources(limit:)` at its own NODES_MAX_LIMIT (500,
+# ingestion/config.py) — `min(max(limit, 1), NODES_MAX_LIMIT)` in graph_read.py — so a
+# larger value here would silently ask for more than the engine will ever return.
+# draft.py detects truncation as `len(rows) >= SOURCES_QUERY_LIMIT`; if this constant
+# ever exceeded the engine's ceiling, a run that hit the *engine's* clamp instead of
+# this one would come back with fewer rows than SOURCES_QUERY_LIMIT and the truncation
+# check would silently miss it — exactly the loss Item 2 exists to make loud. This
+# assertion keeps that invariant from drifting unnoticed; test_draft.py pins it too.
+assert SOURCES_QUERY_LIMIT <= 500, "SOURCES_QUERY_LIMIT must not exceed the engine's NODES_MAX_LIMIT (500)"
 # Sources in one story cluster. A cluster larger than this is truncated, newest first,
 # so one hub entity can't pull the whole window into a single unwritable story.
 CLUSTER_MAX_SOURCES = 12

@@ -57,15 +57,25 @@ def _purge_user(email: str) -> None:
         s.commit()
 
 
+def _own_kb_id(email: str) -> str:
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    with get_postgres_session() as s:
+        user = s.query(User).filter(User.email == email).one()
+        return str(
+            s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).one()[0]
+        )
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    from graph_api import cookie_graphql_router, scoped_cookie_graphql_router
+    from graph_api import cookie_graphql_router
     from routes_auth import router as auth_router
 
     app = FastAPI()
     app.include_router(auth_router)
-    app.include_router(cookie_graphql_router, prefix="/api/graphql")
-    app.include_router(scoped_cookie_graphql_router, prefix="/api/knowledge-bases/{kb_id}/graphql")
+    app.include_router(cookie_graphql_router, prefix="/api/knowledge-bases/{kb_id}/graphql")
     yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
@@ -74,24 +84,19 @@ def _unique_email() -> str:
 
 
 @requires_stack
-def test_graphql_requires_session() -> None:
-    from graph_api import cookie_graphql_router
-    from routes_auth import router as auth_router
-
-    app = FastAPI()
-    app.include_router(auth_router)
-    app.include_router(cookie_graphql_router, prefix="/api/graphql")
-    anon = TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
-    resp = anon.post("/api/graphql", json={"query": "{ nodes { id } }"})
+def test_graphql_requires_session(client: TestClient) -> None:
+    kb_id = str(uuid.uuid4())
+    resp = client.post(f"/api/knowledge-bases/{kb_id}/graphql", json={"query": "{ nodes { id } }"})
     assert resp.status_code == 401
 
 
 @requires_stack
-def test_graphql_runs_query_scoped_to_session_knowledge_base(client: TestClient) -> None:
+def test_graphql_runs_query_scoped_to_the_path_knowledge_base(client: TestClient) -> None:
     email = _unique_email()
     try:
         client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
-        resp = client.post("/api/graphql", json={"query": "{ nodes { id name type } }"})
+        kb_id = _own_kb_id(email)
+        resp = client.post(f"/api/knowledge-bases/{kb_id}/graphql", json={"query": "{ nodes { id name type } }"})
         assert resp.status_code == 200
         body = resp.json()
         assert "errors" not in body, body
@@ -144,15 +149,7 @@ def test_scoped_graphql_uppercase_uuid_reads_the_canonical_graph_nodes(client: T
     kb_id = None
     try:
         client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
-        from accounts import home_knowledge_base_id
-        from db import get_postgres_session
-        from models import User
-
-        with get_postgres_session() as s:
-            user = s.query(User).filter(User.email == email).one()
-            found_kb_id = home_knowledge_base_id(s, user.id)
-            assert found_kb_id is not None
-            kb_id = found_kb_id
+        kb_id = _own_kb_id(email)
 
         _plant_graph_nodes(kb_id)
 
@@ -169,4 +166,3 @@ def test_scoped_graphql_uppercase_uuid_reads_the_canonical_graph_nodes(client: T
         if kb_id is not None:
             purge_knowledge_base(kb_id)
         _purge_user(email)
-

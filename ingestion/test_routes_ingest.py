@@ -170,6 +170,10 @@ def test_job_status_is_readable_by_owner(client: TestClient) -> None:
 
 @requires_pg
 def test_another_knowledge_bases_job_is_404(client: TestClient) -> None:
+    """Exercises `_job_status`'s ownership check, not `require_membership`: the intruder
+    is a legitimate member of their own kb (so membership passes) and asks for the
+    owner's job through *their own* kb path — the 404 must come from
+    `str(job.knowledge_base_id) != kb_id`, not from being refused their own kb."""
     owner = _unique_email()
     intruder = _unique_email()
     try:
@@ -182,7 +186,8 @@ def test_another_knowledge_bases_job_is_404(client: TestClient) -> None:
 
         # registering the intruder overwrites the session cookie with theirs
         _register_and_verify(client, intruder)
-        resp = client.get(f"/api/knowledge-bases/{owner_kb_id}/content/{job_id}")
+        intruder_kb_id = _own_kb_id(intruder)
+        resp = client.get(f"/api/knowledge-bases/{intruder_kb_id}/content/{job_id}")
         assert resp.status_code == 404
     finally:
         _purge_user(owner)

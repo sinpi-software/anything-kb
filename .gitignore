@@ -3,3 +3,4 @@
 
 # SchemaSpy generated output
 schemaspy/output/
+.pnpm-store/

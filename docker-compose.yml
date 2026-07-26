@@ -219,7 +219,7 @@ services:
       # pnpm writes a symlinked virtual store into node_modules/.pnpm, and those
       # symlinks do not survive a bind mount. A named volume shadows the host's.
       - app-node-modules:/app/node_modules
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && exec pnpm dev --host 0.0.0.0 --port 5173"
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --store-dir /app/node_modules/.pnpm-store && exec pnpm dev --host 0.0.0.0 --port 5173"
 
   neonews-site:
     profiles: ["ui"]
@@ -238,7 +238,7 @@ services:
     volumes:
       - ./neonews-site:/app
       - site-node-modules:/app/node_modules
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && exec pnpm dev --host 0.0.0.0 --port 5174"
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --store-dir /app/node_modules/.pnpm-store && exec pnpm dev --host 0.0.0.0 --port 5174"
 
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy

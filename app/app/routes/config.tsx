@@ -10,7 +10,7 @@ import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError, logout, updateConfig } from "~/lib/api";
-import { getConfig, getMe } from "~/lib/auth.server";
+import { KbNotFound, getConfig, getMe } from "~/lib/auth.server";
 import { appNavLinks } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/config";
@@ -22,8 +22,13 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
   if (!me) throw redirect(`/login?next=/app/${params.kbId}/config`);
-  const config = await getConfig(request);
-  return { me, config, kbId: params.kbId };
+  try {
+    const config = await getConfig(request, params.kbId);
+    return { me, config, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 type Save = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
@@ -46,7 +51,7 @@ export default function Config({ loaderData }: Route.ComponentProps) {
     if (disabled || saving) return;
     setSave({ kind: "saving" });
     try {
-      const next = await updateConfig({
+      const next = await updateConfig(kbId, {
         interests,
         discover_types: discoverTypes,
         entity_types: entities,

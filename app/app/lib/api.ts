@@ -103,8 +103,11 @@ export const ingestContent = (text: string, source?: string): Promise<JobAccepte
 
 export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>(`/content/${jobId}`);
 
-export const updateConfig = (config: KbConfig): Promise<KbConfig> =>
-  apiFetch<KbConfig>("/config", { method: "PUT", body: JSON.stringify(config) });
+export const updateConfig = (kbId: string, config: KbConfig): Promise<KbConfig> =>
+  apiFetch<KbConfig>(`/knowledge-bases/${kbId}/config`, {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
 
 export const createKnowledgeBase = (name: string, charter?: string): Promise<KnowledgeBase> =>
   apiFetch<KnowledgeBase>("/knowledge-bases", {

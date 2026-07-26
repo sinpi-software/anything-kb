@@ -49,14 +49,16 @@ export async function getKeys(request: Request, kbId: string): Promise<ApiKey[]>
   }
 }
 
-export async function getConfig(request: Request): Promise<KbConfig> {
+export async function getConfig(request: Request, kbId: string): Promise<KbConfig> {
   try {
-    const res = await fetch(`${INTERNAL_API_URL}/api/config`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/knowledge-bases/${kbId}/config`, {
       headers: forwardCookie(request),
     });
+    if (res.status === 404) throw new KbNotFound();
     if (!res.ok) return EMPTY_CONFIG;
     return await res.json();
-  } catch {
+  } catch (err) {
+    if (err instanceof KbNotFound) throw err;
     return EMPTY_CONFIG;
   }
 }

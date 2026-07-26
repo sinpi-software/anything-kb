@@ -7,7 +7,7 @@ import { SiteHeader } from "~/components/site-header";
 import { Button } from "~/components/ui/button";
 import { logout } from "~/lib/api";
 import { getEntity, getMe } from "~/lib/auth.server";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { appNavLinks } from "~/lib/nav";
 import type { Route } from "./+types/entity";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -16,10 +16,10 @@ export function meta({ loaderData }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect(`/login?next=/app/entity/${params.id}`);
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}/entity/${params.id}`);
   const entity = await getEntity(request, params.id);
   if (!entity) throw new Response("Not found", { status: 404 });
-  return { me, entity };
+  return { me, entity, kbId: params.kbId };
 }
 
 function formatDate(value: string): string {
@@ -29,7 +29,7 @@ function formatDate(value: string): string {
 }
 
 export default function Entity({ loaderData }: Route.ComponentProps) {
-  const { entity } = loaderData;
+  const { me, entity, kbId } = loaderData;
   const navigate = useNavigate();
 
   const groups = new Map<string, typeof entity.edges>();
@@ -55,7 +55,8 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             <LogOut className="size-3.5" aria-hidden="true" />

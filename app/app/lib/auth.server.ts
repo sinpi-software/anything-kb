@@ -3,7 +3,7 @@
 // Cookie header to the in-cluster backend by hand. Never forwards
 // Set-Cookie back — mutations are client-side (see lib/api.ts) and set the
 // cookie directly from the same-origin browser response.
-import type { ApiKey, EntityPage, KbConfig, Me } from "./types";
+import type { ApiKey, EntityPage, KbConfig, KnowledgeBase, Me } from "./types";
 
 const EMPTY_CONFIG: KbConfig = {
   interests: "",
@@ -54,6 +54,29 @@ export async function getConfig(request: Request): Promise<KbConfig> {
     return await res.json();
   } catch {
     return EMPTY_CONFIG;
+  }
+}
+
+/**
+ * A scoped endpoint answered 404: the knowledge base does not exist, is not the
+ * caller's, or their role is too low. The API deliberately does not distinguish those
+ * — a 403 would confirm the knowledge base exists to someone who may not see it.
+ * Loaders catch this and redirect to /app.
+ *
+ * Every other failure keeps returning an empty default instead, because an unreachable
+ * backend should degrade the page rather than bounce the user somewhere confusing.
+ */
+export class KbNotFound extends Error {}
+
+export async function listKnowledgeBases(request: Request): Promise<KnowledgeBase[]> {
+  try {
+    const res = await fetch(`${INTERNAL_API_URL}/api/knowledge-bases`, {
+      headers: forwardCookie(request),
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
   }
 }
 

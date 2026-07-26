@@ -1,7 +1,7 @@
 // Client-side auth + API-key mutations. Same-origin `fetch` so the browser
 // carries the `session` cookie and sends `Origin` automatically — the
 // backend relies on both for CSRF protection.
-import type { ApiKey, CreatedApiKey, KbConfig, Me } from "./types";
+import type { ApiKey, CreatedApiKey, KbConfig, KnowledgeBase, Me } from "./types";
 
 const API_BASE = "/api";
 
@@ -101,3 +101,23 @@ export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>
 
 export const updateConfig = (config: KbConfig): Promise<KbConfig> =>
   apiFetch<KbConfig>("/config", { method: "PUT", body: JSON.stringify(config) });
+
+export const createKnowledgeBase = (name: string, charter?: string): Promise<KnowledgeBase> =>
+  apiFetch<KnowledgeBase>("/knowledge-bases", {
+    method: "POST",
+    body: JSON.stringify({ name, charter: charter?.trim() || null }),
+  });
+
+export const renameKnowledgeBase = (id: string, name: string): Promise<KnowledgeBase> =>
+  apiFetch<KnowledgeBase>(`/knowledge-bases/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+
+// The API requires confirm_name to equal the current name exactly — the delete is
+// permanent and takes the knowledge base's graph with it.
+export const deleteKnowledgeBase = (id: string, confirmName: string): Promise<void> =>
+  apiFetch<void>(`/knowledge-bases/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });

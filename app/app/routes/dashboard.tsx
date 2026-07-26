@@ -11,7 +11,7 @@ import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { ApiError, createKey, logout, revokeKey } from "~/lib/api";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { appNavLinks } from "~/lib/nav";
 import { getKeys, getMe } from "~/lib/auth.server";
 import type { ApiKey, CreatedApiKey } from "~/lib/types";
 import { cn } from "~/lib/utils";
@@ -21,11 +21,11 @@ export function meta({}: Route.MetaArgs) {
   return [{ title: "Dashboard — anything/kb" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect("/login?next=/app");
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}`);
   const keys = await getKeys(request);
-  return { me, keys };
+  return { me, keys, kbId: params.kbId };
 }
 
 function formatDate(value: string | null): string {
@@ -136,7 +136,7 @@ function KeyRow({ apiKey, onRevoke, revoking }: { apiKey: ApiKey; onRevoke: (id:
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { me, keys } = loaderData;
+  const { me, keys, kbId } = loaderData;
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
@@ -168,7 +168,8 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             <LogOut className="size-3.5" aria-hidden="true" />

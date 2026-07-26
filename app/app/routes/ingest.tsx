@@ -11,7 +11,7 @@ import { Input } from "~/components/ui/input";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError, getJob, ingestContent, logout } from "~/lib/api";
 import { getMe } from "~/lib/auth.server";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { appNavLinks } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/ingest";
 
@@ -19,10 +19,10 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Ingest — anything/kb" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect("/login?next=/app/ingest");
-  return { me };
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}/ingest`);
+  return { me, kbId: params.kbId };
 }
 
 const POLL_START_MS = 1500;
@@ -102,7 +102,7 @@ function StatusCard({ phase }: { phase: Phase }) {
 }
 
 export default function Ingest({ loaderData }: Route.ComponentProps) {
-  const { me } = loaderData;
+  const { me, kbId } = loaderData;
   const navigate = useNavigate();
   const knowledgeBase = me.knowledge_bases[0];
 
@@ -173,7 +173,8 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             Log out

@@ -6,9 +6,11 @@ import { ThemeToggle } from "~/components/theme-toggle";
 export interface SiteHeaderProps {
   navLinks?: { href: string; label: string }[];
   actions?: ReactNode;
+  /** Name of the knowledge base the page belongs to, shown for orientation. */
+  kbName?: string;
 }
 
-export function SiteHeader({ navLinks = [], actions }: SiteHeaderProps) {
+export function SiteHeader({ navLinks = [], actions, kbName }: SiteHeaderProps) {
   return (
     <header className="mx-auto flex max-w-(--maxw) flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line px-5 py-4 sm:px-7 sm:py-5">
       <Link
@@ -21,6 +23,11 @@ export function SiteHeader({ navLinks = [], actions }: SiteHeaderProps) {
         />
         anything<span className="text-muted">/kb</span>
       </Link>
+      {kbName ? (
+        <span className="font-display text-sm text-muted" title="Current knowledge base">
+          {kbName}
+        </span>
+      ) : null}
       <nav className="flex flex-wrap items-center gap-4 font-display text-sm sm:gap-6">
         {navLinks.map((link) => (
           <a key={link.href} href={link.href} className="text-muted hover:text-ink">

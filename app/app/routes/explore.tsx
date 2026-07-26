@@ -7,7 +7,7 @@ import { SiteHeader } from "~/components/site-header";
 import { Button } from "~/components/ui/button";
 import { logout } from "~/lib/api";
 import { getMe } from "~/lib/auth.server";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { appNavLinks } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/explore";
 
@@ -15,10 +15,10 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Explore — anything/kb" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect("/login?next=/app/explore");
-  return { me };
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}/explore`);
+  return { me, kbId: params.kbId };
 }
 
 type Tab = "graph" | "query";
@@ -38,7 +38,8 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-export default function Explore() {
+export default function Explore({ loaderData }: Route.ComponentProps) {
+  const { me, kbId } = loaderData;
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("graph");
 
@@ -50,7 +51,8 @@ export default function Explore() {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             Log out

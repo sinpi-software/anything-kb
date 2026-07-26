@@ -23,7 +23,8 @@ from accounts import (
     verify_password,
 )
 from db import get_postgres_session
-from models import AuthSession, KnowledgeBase, KnowledgeBaseUser, KnowledgeBaseUserRole, User
+from memberships import create_knowledge_base
+from models import AuthSession, KnowledgeBase, KnowledgeBaseUser, User
 from schemas import (
     ForgotPasswordRequest,
     KnowledgeBaseMembership,
@@ -100,18 +101,7 @@ def register(payload: RegisterRequest, response: Response) -> MeResponse:
         user.updated_by_id = user.id
 
         knowledge_base_name = (payload.knowledge_base_name or "").strip() or "My workspace"
-        knowledge_base = KnowledgeBase(name=knowledge_base_name, created_by_id=user.id, updated_by_id=user.id)
-        session.add(knowledge_base)
-        session.flush()
-        session.add(
-            KnowledgeBaseUser(
-                knowledge_base_id=knowledge_base.id,
-                user_id=user.id,
-                role=KnowledgeBaseUserRole.OWNER.value,
-                created_by_id=user.id,
-                updated_by_id=user.id,
-            )
-        )
+        create_knowledge_base(session, user, knowledge_base_name)
         session.commit()
         session.refresh(user)
 

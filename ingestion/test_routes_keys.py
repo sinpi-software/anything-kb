@@ -28,7 +28,7 @@ LOCALHOST_ORIGIN = {"Origin": "http://localhost:5173"}
 
 def _purge_user(email: str) -> None:
     from db import get_postgres_session
-    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseUser, User
+    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, User
 
     with get_postgres_session() as s:
         user = s.query(User).filter(User.email == email).one_or_none()
@@ -40,6 +40,9 @@ def _purge_user(email: str) -> None:
         ]
         if knowledge_base_ids:
             s.query(ApiKey).filter(ApiKey.knowledge_base_id.in_(knowledge_base_ids)).delete(synchronize_session=False)
+            s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id.in_(knowledge_base_ids)).delete(
+                synchronize_session=False
+            )
         s.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
         s.query(EmailToken).filter(EmailToken.user_id == user.id).delete(synchronize_session=False)
         s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).delete(synchronize_session=False)
@@ -53,10 +56,12 @@ def _purge_user(email: str) -> None:
 def client() -> Iterator[TestClient]:
     from routes_auth import router as auth_router
     from routes_keys import router as keys_router
+    from routes_keys import scoped_router as keys_scoped_router
 
     app = FastAPI()
     app.include_router(auth_router)
     app.include_router(keys_router)
+    app.include_router(keys_scoped_router)
     # base_url must be https:// — the session cookie is Secure, so httpx's cookie jar
     # only attaches it back on an https connection (matching real browser behavior).
     # A default Origin header keeps setup calls (register/login) past require_csrf,
@@ -203,3 +208,62 @@ def test_revoke_unknown_key_is_404(client: TestClient) -> None:
 def test_keys_require_login(client: TestClient) -> None:
     assert client.get("/api/keys").status_code == 401
     assert client.post("/api/keys", json={"name": "x"}, headers=LOCALHOST_ORIGIN).status_code == 401
+
+
+@requires_pg
+def test_scoped_and_legacy_key_listing_agree(client: TestClient) -> None:
+    """The two paths differ only in how the knowledge base is chosen."""
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        client.post("/api/keys", json={"name": "k1"}, headers=LOCALHOST_ORIGIN)
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            kb_id = str(
+                s.query(KnowledgeBaseUser.knowledge_base_id)
+                .filter(KnowledgeBaseUser.user_id == user.id)
+                .one()[0]
+            )
+        legacy = client.get("/api/keys").json()
+        scoped = client.get(f"/api/knowledge-bases/{kb_id}/keys").json()
+        assert legacy == scoped
+        assert len(scoped) == 1
+    finally:
+        _purge_user(email)
+
+
+@requires_pg
+def test_scoped_keys_for_a_foreign_knowledge_base_are_404(client: TestClient) -> None:
+    import uuid as _uuid
+
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        resp = client.get(f"/api/knowledge-bases/{_uuid.uuid4()}/keys")
+        assert resp.status_code == 404
+    finally:
+        _purge_user(email)
+
+
+@requires_pg
+def test_editor_may_not_manage_keys(client: TestClient) -> None:
+    """API keys need admin. This is the boundary pair's refused side."""
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            membership = s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).one()
+            kb_id = str(membership.knowledge_base_id)
+            membership.role = "editor"
+            s.commit()
+        assert client.get(f"/api/knowledge-bases/{kb_id}/keys").status_code == 404
+        assert client.get("/api/keys").status_code == 404, "legacy must enforce the same floor"
+    finally:
+        _purge_user(email)

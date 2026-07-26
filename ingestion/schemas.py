@@ -112,3 +112,28 @@ class ApiKeyOut(BaseModel):
     created_at: datetime
     last_used_at: datetime | None
     revoked_at: datetime | None
+
+
+# --- knowledge bases -----------------------------------------------------------
+
+
+class KnowledgeBaseOut(BaseModel):
+    id: str
+    name: str
+    charter: str | None
+    role: str
+    created_at: datetime
+
+
+class KnowledgeBaseCreateRequest(BaseModel):
+    name: str
+    charter: str | None = None
+
+
+class KnowledgeBaseUpdateRequest(BaseModel):
+    name: str | None = None
+    charter: str | None = None
+
+
+class KnowledgeBaseDeleteRequest(BaseModel):
+    confirm_name: str

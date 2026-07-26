@@ -29,7 +29,13 @@ def seed_database() -> None:
     from argon2 import PasswordHasher
 
     from db import get_postgres_session
-    from models import KnowledgeBase, KnowledgeBaseUser, KnowledgeBaseUserRole, User
+    from memberships import (
+        DEFAULT_ENTITY_TYPES,
+        DEFAULT_INTERESTS,
+        DEFAULT_RELATIONSHIP_TYPES,
+        create_knowledge_base,
+    )
+    from models import KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, KnowledgeBaseUserRole, User
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
@@ -50,46 +56,60 @@ def seed_database() -> None:
         if admin_created:
             admin.created_by_id = admin.id
             admin.updated_by_id = admin.id
-        audit = {"created_by": admin, "updated_by": admin}
 
-        knowledge_base, org_created = get_or_create(
-            session,
-            KnowledgeBase,
-            defaults=dict(charter="This is the default knowledge base.", **audit),
-            name="Default Knowledge Base",
+        knowledge_base = (
+            session.query(KnowledgeBase).filter(KnowledgeBase.name == "Default Knowledge Base").one_or_none()
         )
-        _membership, membership_created = get_or_create(
-            session,
-            KnowledgeBaseUser,
-            defaults=dict(role=KnowledgeBaseUserRole.OWNER.value, **audit),
-            knowledge_base_id=knowledge_base.id,
-            user_id=admin.id,
-        )
+        org_created = knowledge_base is None
+        if knowledge_base is None:
+            knowledge_base = create_knowledge_base(
+                session, admin, "Default Knowledge Base", charter="This is the default knowledge base."
+            )
+            membership_created = config_created = True
+        else:
+            # The knowledge base already existed, but its membership or config may not
+            # have — e.g. a prior run was interrupted between the three inserts that
+            # create_knowledge_base makes together. Repair whichever piece is missing
+            # instead of assuming the knowledge base's existence implies the rest does.
+            membership = (
+                session.query(KnowledgeBaseUser)
+                .filter(
+                    KnowledgeBaseUser.knowledge_base_id == knowledge_base.id,
+                    KnowledgeBaseUser.user_id == admin.id,
+                )
+                .one_or_none()
+            )
+            membership_created = membership is None
+            if membership is None:
+                session.add(
+                    KnowledgeBaseUser(
+                        knowledge_base_id=knowledge_base.id,
+                        user_id=admin.id,
+                        role=KnowledgeBaseUserRole.OWNER.value,
+                        created_by_id=admin.id,
+                        updated_by_id=admin.id,
+                    )
+                )
+
+            config = (
+                session.query(KnowledgeBaseConfig)
+                .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base.id)
+                .one_or_none()
+            )
+            config_created = config is None
+            if config is None:
+                session.add(
+                    KnowledgeBaseConfig(
+                        knowledge_base_id=knowledge_base.id,
+                        interests=DEFAULT_INTERESTS,
+                        discover_types=True,
+                        entity_types=DEFAULT_ENTITY_TYPES,
+                        relationship_types=DEFAULT_RELATIONSHIP_TYPES,
+                    )
+                )
 
         from auth import generate_api_key, hash_key
-        from models import ApiKey, KnowledgeBaseConfig
-
-        _cfg, config_created = get_or_create(
-            session,
-            KnowledgeBaseConfig,
-            defaults={
-                "interests": "Is this content about technology, science, or business news?",
-                "discover_types": True,
-                "entity_types": [
-                    {"name": "Person", "description": "A specific, named individual human."},
-                    {"name": "Organization", "description": "A company, agency, institution, or group."},
-                    {"name": "Place", "description": "A geographic location — city, country, region, or venue."},
-                    {"name": "Topic", "description": "A subject, field, technology, or theme."},
-                ],
-                "relationship_types": [
-                    {"name": "Works at", "description": "A person is employed by or leads an organization."},
-                    {"name": "Located in", "description": "An entity is situated in a place."},
-                    {"name": "Related to", "description": "A general association between two entities."},
-                    {"name": "Founded", "description": "A person or organization established an organization."},
-                ],
-            },
-            knowledge_base_id=knowledge_base.id,
-        )
+        from models import ApiKey
 
         existing_key = (
             session.query(ApiKey)

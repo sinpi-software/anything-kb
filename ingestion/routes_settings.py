@@ -6,14 +6,17 @@ interests and entity/relationship types set here apply to every subsequent inges
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session as OrmSession
 
 from accounts import current_user, home_knowledge_base_id, require_csrf
 from db import get_postgres_session
+from memberships import require_membership
 from models import KnowledgeBaseConfig, User
 from sanitize import sanitize
 from schemas import ConfigRequest, ConfigResponse, TypeDef
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"], dependencies=[Depends(require_csrf)])
+scoped_router = APIRouter(prefix="/api/knowledge-bases", tags=["Configuration"], dependencies=[Depends(require_csrf)])
 
 
 def _clean_types(values: list[TypeDef]) -> list[dict[str, Any]]:
@@ -29,27 +32,61 @@ def _clean_types(values: list[TypeDef]) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _get_config(session: OrmSession, kb_id: str) -> ConfigResponse:
+    cfg = session.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == kb_id).one_or_none()
+    return ConfigResponse(
+        knowledge_base_id=kb_id,
+        interests=cfg.interests if cfg else "",
+        discover_types=cfg.discover_types if cfg else True,
+        entity_types=[TypeDef.model_validate(t) for t in cfg.entity_types] if cfg else [],
+        relationship_types=[TypeDef.model_validate(t) for t in cfg.relationship_types] if cfg else [],
+    )
+
+
 @router.get("", response_model=ConfigResponse)
 def get_config(user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B008 — FastAPI dependency idiom
-    """The caller's current interests and entity/relationship types (empty if unset)."""
+    """Legacy: the knowledge base is implied. Sub-project B removes this."""
     with get_postgres_session() as session:
-        knowledge_base_id = home_knowledge_base_id(session, user.id)
-        if knowledge_base_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="no knowledge base found for this account"
-            )
-        cfg = (
-            session.query(KnowledgeBaseConfig)
-            .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
-            .one_or_none()
+        kb_id = home_knowledge_base_id(session, user.id)
+        require_membership(session, user.id, kb_id, "reader")
+        assert kb_id is not None  # require_membership already 404s a None kb_id
+        return _get_config(session, kb_id)
+
+
+@scoped_router.get("/{kb_id}/config", response_model=ConfigResponse)
+def get_config_scoped(kb_id: str, user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B008
+    with get_postgres_session() as session:
+        require_membership(session, user.id, kb_id, "reader")
+        return _get_config(session, kb_id)
+
+
+def _put_config(session: OrmSession, kb_id: str, body: ConfigRequest) -> ConfigResponse:
+    interests = sanitize(body.interests).strip()
+    entity_types = _clean_types(body.entity_types)
+    relationship_types = _clean_types(body.relationship_types)
+    cfg = session.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == kb_id).one_or_none()
+    if cfg is None:
+        cfg = KnowledgeBaseConfig(
+            knowledge_base_id=kb_id,
+            interests=interests,
+            discover_types=body.discover_types,
+            entity_types=entity_types,
+            relationship_types=relationship_types,
         )
-        return ConfigResponse(
-            knowledge_base_id=knowledge_base_id,
-            interests=cfg.interests if cfg else "",
-            discover_types=cfg.discover_types if cfg else True,
-            entity_types=[TypeDef.model_validate(t) for t in cfg.entity_types] if cfg else [],
-            relationship_types=[TypeDef.model_validate(t) for t in cfg.relationship_types] if cfg else [],
-        )
+        session.add(cfg)
+    else:
+        cfg.interests = interests
+        cfg.discover_types = body.discover_types
+        cfg.entity_types = entity_types
+        cfg.relationship_types = relationship_types
+    session.commit()
+    return ConfigResponse(
+        knowledge_base_id=kb_id,
+        interests=interests,
+        discover_types=body.discover_types,
+        entity_types=[TypeDef.model_validate(t) for t in entity_types],
+        relationship_types=[TypeDef.model_validate(t) for t in relationship_types],
+    )
 
 
 @router.put("", response_model=ConfigResponse)
@@ -57,42 +94,24 @@ def put_config(
     body: ConfigRequest,
     user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom
 ) -> ConfigResponse:
-    """Upsert the interests and the entity/relationship types the graph captures."""
+    """Legacy: the knowledge base is implied. Sub-project B removes this."""
     if not user.email_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="verify your email to edit configuration")
-    interests = sanitize(body.interests).strip()
-    entity_types = _clean_types(body.entity_types)
-    relationship_types = _clean_types(body.relationship_types)
     with get_postgres_session() as session:
-        knowledge_base_id = home_knowledge_base_id(session, user.id)
-        if knowledge_base_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="no knowledge base found for this account"
-            )
-        cfg = (
-            session.query(KnowledgeBaseConfig)
-            .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base_id)
-            .one_or_none()
-        )
-        if cfg is None:
-            cfg = KnowledgeBaseConfig(
-                knowledge_base_id=knowledge_base_id,
-                interests=interests,
-                discover_types=body.discover_types,
-                entity_types=entity_types,
-                relationship_types=relationship_types,
-            )
-            session.add(cfg)
-        else:
-            cfg.interests = interests
-            cfg.discover_types = body.discover_types
-            cfg.entity_types = entity_types
-            cfg.relationship_types = relationship_types
-        session.commit()
-    return ConfigResponse(
-        knowledge_base_id=knowledge_base_id,
-        interests=interests,
-        discover_types=body.discover_types,
-        entity_types=[TypeDef.model_validate(t) for t in entity_types],
-        relationship_types=[TypeDef.model_validate(t) for t in relationship_types],
-    )
+        kb_id = home_knowledge_base_id(session, user.id)
+        require_membership(session, user.id, kb_id, "admin")
+        assert kb_id is not None  # require_membership already 404s a None kb_id
+        return _put_config(session, kb_id, body)
+
+
+@scoped_router.put("/{kb_id}/config", response_model=ConfigResponse)
+def put_config_scoped(
+    kb_id: str,
+    body: ConfigRequest,
+    user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom
+) -> ConfigResponse:
+    if not user.email_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="verify your email to edit configuration")
+    with get_postgres_session() as session:
+        require_membership(session, user.id, kb_id, "admin")
+        return _put_config(session, kb_id, body)

@@ -28,7 +28,7 @@ LOCALHOST_ORIGIN = {"Origin": "http://localhost:5173"}
 
 def _purge_user(email: str) -> None:
     from db import get_postgres_session
-    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseUser, User
+    from models import ApiKey, AuthSession, EmailToken, KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, User
 
     with get_postgres_session() as s:
         user = s.query(User).filter(User.email == email).one_or_none()
@@ -40,6 +40,9 @@ def _purge_user(email: str) -> None:
         ]
         if knowledge_base_ids:
             s.query(ApiKey).filter(ApiKey.knowledge_base_id.in_(knowledge_base_ids)).delete(synchronize_session=False)
+            s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id.in_(knowledge_base_ids)).delete(
+                synchronize_session=False
+            )
         s.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
         s.query(EmailToken).filter(EmailToken.user_id == user.id).delete(synchronize_session=False)
         s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).delete(synchronize_session=False)

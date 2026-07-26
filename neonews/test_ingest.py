@@ -6,7 +6,7 @@ from typing import Any
 os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import delete, text
 
 import config
 import engine
@@ -30,6 +30,14 @@ requires_postgres = pytest.mark.skipif(not _HAS_POSTGRES, reason="Postgres not r
 
 @pytest.fixture
 def item() -> Generator[str, None, None]:
+    """Each invocation gets its own throwaway Source (a random locator, so it can
+    never collide with another test's). Teardown deletes every Item under that
+    source_id, then the source itself — which is exactly "the rows this test
+    created": nothing else can share that source_id, including a sibling item a
+    test adds under it (see the two flow tests below). Without this, `test_ingest.py`
+    would leave a permanently-pending row (job_id IS NULL, attempts < cap) behind on
+    every run, forever growing the backlog the `ingest_items()` sweep has to wade
+    through."""
     with get_postgres_session() as s:
         source = Source(kind="rss", locator=f"https://example.com/{os.urandom(4).hex()}.xml")
         s.add(source)
@@ -44,7 +52,13 @@ def item() -> Generator[str, None, None]:
         )
         s.add(row)
         s.commit()
-        yield str(row.id)
+        item_id = str(row.id)
+        source_id = str(source.id)
+    yield item_id
+    with get_postgres_session() as s:
+        s.execute(delete(Item).where(Item.source_id == source_id))
+        s.execute(delete(Source).where(Source.id == source_id))
+        s.commit()
 
 
 @requires_postgres
@@ -147,6 +161,13 @@ def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.Monkey
     (by a label unique to its id) so those unrelated rows pass through harmlessly
     instead of tripping it; the DB-state assertions below are the real proof that
     *this* item was never touched.
+
+    A sibling item — same batch, but eligible — is a positive control: it proves
+    the sweep actually reached this batch at all. `INGEST_BATCH_SIZE` rows are swept
+    oldest-first, and without this control, a large enough backlog of permanently-
+    pending rows (from other tests, or other runs of this file) could push both this
+    item and its sibling out of the batch entirely — at which point the assertions
+    below would hold vacuously, whether or not the cap is actually enforced.
     """
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
     label = f"cap-test-{item}"
@@ -154,7 +175,7 @@ def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.Monkey
     def fake_post(text_: str, metadata: dict[str, Any]) -> str:
         if metadata.get("label") == label:
             pytest.fail("should not submit: item is over the attempt cap")
-        return "job-unrelated"  # some other pending row; not this test's concern
+        return "job-sibling"  # the positive control, or some other pending row
 
     monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
@@ -162,27 +183,45 @@ def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.Monkey
         assert row is not None
         row.title = label
         row.attempts = config.MAX_SUBMIT_ATTEMPTS
+        # Shares this test's dedicated source_id, so the `item` fixture's teardown
+        # deletes it too — no separate cleanup needed here.
+        sibling = Item(
+            source_id=row.source_id,
+            dedup_key=os.urandom(4).hex(),
+            url="https://example.com/sibling",
+            title=f"cap-test-sibling-{item}",
+            content="Sibling body.",
+        )
+        s.add(sibling)
         s.commit()
+        sibling_id = str(sibling.id)
+
     ingest.ingest_items()
+
     with get_postgres_session() as s:
         refreshed = s.get(Item, item)
         assert refreshed is not None
         assert refreshed.job_id is None
         assert refreshed.attempts == config.MAX_SUBMIT_ATTEMPTS  # untouched: never even attempted
 
+        sibling_refreshed = s.get(Item, sibling_id)
+        assert sibling_refreshed is not None
+        assert sibling_refreshed.job_id is not None  # positive control: the sweep did reach this batch
+
 
 @requires_postgres
 def test_ingest_flow_leaves_already_submitted_items_alone(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """Proves the `job_id IS NULL` half of the sweep: an item that already has a
     job_id is never re-submitted. See the cap test above for why the fail-trap is
-    scoped to this test's own item rather than any call at all."""
+    scoped to this test's own item rather than any call at all, and for why the
+    sibling positive control is needed to rule out batch-size starvation."""
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
     label = f"submitted-test-{item}"
 
     def fake_post(text_: str, metadata: dict[str, Any]) -> str:
         if metadata.get("label") == label:
             pytest.fail("should not resubmit: item already has a job_id")
-        return "job-unrelated"
+        return "job-sibling"
 
     monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
@@ -190,12 +229,27 @@ def test_ingest_flow_leaves_already_submitted_items_alone(monkeypatch: pytest.Mo
         assert row is not None
         row.title = label
         row.job_id = "job-existing"
+        sibling = Item(
+            source_id=row.source_id,
+            dedup_key=os.urandom(4).hex(),
+            url="https://example.com/sibling",
+            title=f"submitted-test-sibling-{item}",
+            content="Sibling body.",
+        )
+        s.add(sibling)
         s.commit()
+        sibling_id = str(sibling.id)
+
     ingest.ingest_items()
+
     with get_postgres_session() as s:
         refreshed = s.get(Item, item)
         assert refreshed is not None
         assert refreshed.job_id == "job-existing"  # unchanged
+
+        sibling_refreshed = s.get(Item, sibling_id)
+        assert sibling_refreshed is not None
+        assert sibling_refreshed.job_id is not None  # positive control: the sweep did reach this batch
 
 
 def test_extract_text_returns_none_on_a_blocked_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,8 +1,23 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from sources import Item, canonicalize_url, parse_feed
+from sources import Item, SourceSpec, canonicalize_url, fetch_items, load_config, parse_feed
+
+TOML = """
+[[sources]]
+kind = "rss"
+url = "https://example.com/feed.xml"
+title = "Example News"
+
+[[sources]]
+kind = "files"
+path = "./drop"
+
+[editorial]
+beat = "Write for readers of the county paper."
+"""
 
 FEED = b"""<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -101,3 +116,74 @@ def test_item_is_frozen() -> None:
     item = Item(dedup_key="k", title="t", text="x", url=None, published_at=None)
     with pytest.raises(Exception):  # noqa: B017 - only frozen-ness is asserted, not the exception type
         item.title = "changed"  # type: ignore[misc]
+
+
+def test_load_config_returns_specs_and_beat(tmp_path: Path) -> None:
+    path = tmp_path / "neonews.toml"
+    path.write_text(TOML)
+    specs, beat = load_config(path)
+    assert specs == [
+        SourceSpec(kind="rss", locator="https://example.com/feed.xml", title="Example News"),
+        SourceSpec(kind="files", locator="./drop", title=None),
+    ]
+    assert beat == "Write for readers of the county paper."
+
+
+def test_load_config_rejects_an_unknown_kind(tmp_path: Path) -> None:
+    path = tmp_path / "neonews.toml"
+    path.write_text('[[sources]]\nkind = "carrier-pigeon"\nurl = "x"\n')
+    with pytest.raises(ValueError, match="carrier-pigeon"):
+        load_config(path)
+
+
+def test_load_config_defaults_beat_to_empty(tmp_path: Path) -> None:
+    path = tmp_path / "neonews.toml"
+    path.write_text('[[sources]]\nkind = "files"\npath = "./drop"\n')
+    _, beat = load_config(path)
+    assert beat == ""
+
+
+def test_files_adapter_reads_a_directory(tmp_path: Path) -> None:
+    (tmp_path / "one.txt").write_text("First body.")
+    (tmp_path / "two.md").write_text("Second body.")
+    (tmp_path / "skip.bin").write_bytes(b"\x00\x01")
+    title, items = fetch_items("files", str(tmp_path))
+    assert title is None
+    assert {i.title for i in items} == {"one.txt", "two.md"}
+    assert {i.text for i in items} == {"First body.", "Second body."}
+
+
+def test_files_adapter_dedup_key_changes_with_content(tmp_path: Path) -> None:
+    """Editing a dropped file makes it a new item; re-polling an unchanged one does not."""
+    path = tmp_path / "one.txt"
+    path.write_text("First body.")
+    _, before = fetch_items("files", str(tmp_path))
+    _, again = fetch_items("files", str(tmp_path))
+    path.write_text("Edited body.")
+    _, after = fetch_items("files", str(tmp_path))
+    assert before[0].dedup_key == again[0].dedup_key
+    assert before[0].dedup_key != after[0].dedup_key
+
+
+def test_files_adapter_on_a_missing_directory_returns_nothing(tmp_path: Path) -> None:
+    title, items = fetch_items("files", str(tmp_path / "nope"))
+    assert (title, items) == (None, [])
+
+
+def test_fetch_items_rejects_an_unknown_kind() -> None:
+    with pytest.raises(ValueError, match="carrier-pigeon"):
+        fetch_items("carrier-pigeon", "x")
+
+
+def test_rss_adapter_fetches_through_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_fetch(url: str, **_kw: object) -> bytes:
+        calls.append(url)
+        return FEED
+
+    monkeypatch.setattr("sources.net_guard.fetch", fake_fetch)
+    title, items = fetch_items("rss", "https://example.com/feed.xml")
+    assert calls == ["https://example.com/feed.xml"]
+    assert title == "Example News"
+    assert len(items) == 3

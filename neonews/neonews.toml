@@ -1,0 +1,19 @@
+# Sources and editorial voice. Config lives here, in git; runtime state lives in
+# Postgres. Every poll run upserts these into neonews_sources.
+
+[[sources]]
+kind = "files"
+path = "./drop"
+title = "Manual drop"
+
+# [[sources]]
+# kind = "rss"
+# url = "https://example.com/feed.xml"
+# title = "Example News"
+
+[editorial]
+beat = """
+You are drafting an issue of a local news digest.
+Lead with what changed and who it affects. Be concrete and plain-spoken.
+Never speculate beyond the cited material.
+"""

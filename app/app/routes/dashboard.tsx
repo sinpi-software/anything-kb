@@ -176,13 +176,13 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     revalidator.revalidate();
   }
 
-  const primaryKnowledgeBase = me.knowledge_bases[0];
+  const currentKnowledgeBase = me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId);
 
   return (
     <div className="min-h-svh">
       <SiteHeader
         navLinks={appNavLinks(kbId)}
-        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
+        kbName={currentKnowledgeBase?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             <LogOut className="size-3.5" aria-hidden="true" />
@@ -195,7 +195,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           Dashboard
         </p>
         <h1 className="mt-3.5 text-3xl font-semibold tracking-tight">{me.email}</h1>
-        {primaryKnowledgeBase ? <p className="mt-1 text-muted">{primaryKnowledgeBase.knowledge_base_name}</p> : null}
+        {currentKnowledgeBase ? <p className="mt-1 text-muted">{currentKnowledgeBase.knowledge_base_name}</p> : null}
 
         <div className="mt-8 flex flex-col gap-6">
           {!me.email_verified ? (

@@ -12,7 +12,7 @@ import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { ApiError, createKey, logout, revokeKey } from "~/lib/api";
 import { appNavLinks } from "~/lib/nav";
-import { getKeys, getMe } from "~/lib/auth.server";
+import { KbNotFound, getKeys, getMe } from "~/lib/auth.server";
 import type { ApiKey, CreatedApiKey } from "~/lib/types";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/dashboard";
@@ -24,8 +24,13 @@ export function meta({}: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
   if (!me) throw redirect(`/login?next=/app/${params.kbId}`);
-  const keys = await getKeys(request);
-  return { me, keys, kbId: params.kbId };
+  try {
+    const keys = await getKeys(request, params.kbId);
+    return { me, keys, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 function formatDate(value: string | null): string {
@@ -55,7 +60,15 @@ function CreatedKeyCallout({ created, onDismiss }: { created: CreatedApiKey; onD
   );
 }
 
-function CreateKeyForm({ disabled, onCreated }: { disabled: boolean; onCreated: (key: CreatedApiKey) => void }) {
+function CreateKeyForm({
+  kbId,
+  disabled,
+  onCreated,
+}: {
+  kbId: string;
+  disabled: boolean;
+  onCreated: (key: CreatedApiKey) => void;
+}) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -65,7 +78,7 @@ function CreateKeyForm({ disabled, onCreated }: { disabled: boolean; onCreated: 
     setError(null);
     setSubmitting(true);
     try {
-      const created = await createKey(name);
+      const created = await createKey(kbId, name);
       setName("");
       onCreated(created);
     } catch (err) {
@@ -151,7 +164,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   async function handleRevoke(id: string) {
     setRevokingId(id);
     try {
-      await revokeKey(id);
+      await revokeKey(kbId, id);
       await revalidator.revalidate();
     } finally {
       setRevokingId(null);
@@ -199,7 +212,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             </CardDescription>
 
             <div className="mt-6">
-              <CreateKeyForm disabled={!me.email_verified} onCreated={handleCreated} />
+              <CreateKeyForm kbId={kbId} disabled={!me.email_verified} onCreated={handleCreated} />
             </div>
 
             {keys.length > 0 ? (

@@ -70,13 +70,17 @@ export const resetPassword = (token: string, password: string): Promise<Me> =>
     body: JSON.stringify({ token, password }),
   });
 
-export const listKeys = (): Promise<ApiKey[]> => apiFetch<ApiKey[]>("/keys");
+export const listKeys = (kbId: string): Promise<ApiKey[]> =>
+  apiFetch<ApiKey[]>(`/knowledge-bases/${kbId}/keys`);
 
-export const createKey = (name: string): Promise<CreatedApiKey> =>
-  apiFetch<CreatedApiKey>("/keys", { method: "POST", body: JSON.stringify({ name }) });
+export const createKey = (kbId: string, name: string): Promise<CreatedApiKey> =>
+  apiFetch<CreatedApiKey>(`/knowledge-bases/${kbId}/keys`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 
-export const revokeKey = (id: string): Promise<void> =>
-  apiFetch<void>(`/keys/${id}`, { method: "DELETE" });
+export const revokeKey = (kbId: string, id: string): Promise<void> =>
+  apiFetch<void>(`/knowledge-bases/${kbId}/keys/${id}`, { method: "DELETE" });
 
 export interface JobAccepted {
   job_id: string;

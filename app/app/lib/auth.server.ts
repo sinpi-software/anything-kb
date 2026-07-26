@@ -33,14 +33,18 @@ export async function getMe(request: Request): Promise<Me | null> {
   }
 }
 
-export async function getKeys(request: Request): Promise<ApiKey[]> {
+export async function getKeys(request: Request, kbId: string): Promise<ApiKey[]> {
   try {
-    const res = await fetch(`${INTERNAL_API_URL}/api/keys`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/knowledge-bases/${kbId}/keys`, {
       headers: forwardCookie(request),
     });
+    if (res.status === 404) throw new KbNotFound();
     if (!res.ok) return [];
     return await res.json();
-  } catch {
+  } catch (err) {
+    // A 404 means the knowledge base is not the caller's — the loader redirects. Any
+    // other failure degrades to an empty list rather than bouncing the user.
+    if (err instanceof KbNotFound) throw err;
     return [];
   }
 }

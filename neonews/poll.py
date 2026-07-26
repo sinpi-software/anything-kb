@@ -131,9 +131,7 @@ def poll_sources() -> dict[str, int]:
         for source in active:
             inserted += poll_source(session, source)
             session.commit()
-    logger.info(
-        "polled %d sources, %d new items, %d source(s) deactivated", len(active), inserted, deactivated
-    )
+    logger.info("polled %d sources, %d new items, %d source(s) deactivated", len(active), inserted, deactivated)
     return {"sources": len(active), "inserted": inserted, "deactivated": deactivated}
 
 

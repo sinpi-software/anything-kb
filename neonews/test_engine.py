@@ -31,9 +31,7 @@ def test_post_content_sends_bearer_and_returns_job_id(monkeypatch: pytest.Monkey
 
 
 def test_post_content_raises_on_non_2xx(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        engine, "_client", lambda: _client(lambda r: httpx.Response(401, json={"detail": "bad key"}))
-    )
+    monkeypatch.setattr(engine, "_client", lambda: _client(lambda r: httpx.Response(401, json={"detail": "bad key"})))
     with pytest.raises(engine.EngineError, match="401"):
         engine.post_content("hello", {})
 

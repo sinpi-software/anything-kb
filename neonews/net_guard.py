@@ -90,9 +90,7 @@ def _ssl_context() -> ssl.SSLContext:
 
 @lru_cache(maxsize=1)
 def guarded_opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(
-        urllib.request.HTTPSHandler(context=_ssl_context()), _GuardedRedirectHandler()
-    )
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ssl_context()), _GuardedRedirectHandler())
 
 
 def fetch(url: str, timeout: int = config.FETCH_TIMEOUT_SECONDS) -> bytes:

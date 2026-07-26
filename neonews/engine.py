@@ -62,9 +62,7 @@ def _json(response: httpx.Response, what: str) -> dict[str, Any]:
 def post_content(text: str, metadata: dict[str, Any]) -> str:
     """Queue text for ingestion. Returns the engine's job_id (HTTP 202)."""
     body = _json(
-        _client().post(
-            "/content", json={"text": text, "metadata": metadata}, headers=_auth_headers()
-        ),
+        _client().post("/content", json={"text": text, "metadata": metadata}, headers=_auth_headers()),
         "post_content",
     )
     job_id = body.get("job_id")

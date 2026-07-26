@@ -150,9 +150,7 @@ def test_a_failing_cluster_is_dropped_and_the_issue_still_ships(
     assert result["clusters"] == 2
 
 
-def test_an_empty_window_still_writes_an_issue_and_advances(
-    monkeypatch: pytest.MonkeyPatch, output_dir: Path
-) -> None:
+def test_an_empty_window_still_writes_an_issue_and_advances(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -> None:
     monkeypatch.setattr(draft.engine, "recent_sources", lambda since, limit: [])
     result = draft.draft_issue()
     assert result["stories"] == 0
@@ -160,9 +158,7 @@ def test_an_empty_window_still_writes_an_issue_and_advances(
         assert s.get(JobState, config.DRAFT_WATERMARK_KEY) is not None
 
 
-def test_all_clusters_failing_does_not_advance_the_watermark(
-    monkeypatch: pytest.MonkeyPatch, output_dir: Path
-) -> None:
+def test_all_clusters_failing_does_not_advance_the_watermark(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -> None:
     """A non-empty window where every cluster's LLM call failed is not the same as a
     genuinely empty window. Conflating them (write "No new stories", advance anyway)
     would silently and permanently lose those sources — a duplicated issue is

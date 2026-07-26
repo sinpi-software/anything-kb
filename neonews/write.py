@@ -66,8 +66,7 @@ def cluster_brief(cluster: Cluster) -> str:
     parts = []
     for entity in cluster.entities:
         parts.append(
-            f"### {entity.get('name')} ({entity.get('type')})\n"
-            f"{entity.get('article') or entity.get('summary') or ''}"
+            f"### {entity.get('name')} ({entity.get('type')})\n{entity.get('article') or entity.get('summary') or ''}"
         )
     citations = "\n".join(
         f"- {source.get('label') or 'untitled'}" + (f" ({date})" if (date := _date_of(source)) else "")
@@ -100,9 +99,7 @@ def write_story(client: Any, beat: str, cluster: Cluster) -> Story:
     return Story.model_validate(json.loads(content))
 
 
-def assemble_issue(
-    stories: list[tuple[Story, Cluster]], generated_at: datetime, covers_since: datetime
-) -> str:
+def assemble_issue(stories: list[tuple[Story, Cluster]], generated_at: datetime, covers_since: datetime) -> str:
     """The issue as markdown: a dated header, each story, and its citations."""
     lines = [
         f"# Issue — {generated_at.date().isoformat()}",

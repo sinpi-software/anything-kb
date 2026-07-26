@@ -107,9 +107,7 @@ def test_prepare_stamps_extracted_at_even_when_extraction_yields_nothing(
         assert refreshed.full_text == "Feed body."  # fell back to the feed's own content
 
 
-def test_prepare_falls_back_to_feed_content_when_there_is_no_url(
-    monkeypatch: pytest.MonkeyPatch, item: str
-) -> None:
+def test_prepare_falls_back_to_feed_content_when_there_is_no_url(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     monkeypatch.setattr(ingest, "extract_text", lambda url: pytest.fail("should not fetch without a url"))
     with get_postgres_session() as s:
         row = s.get(Item, item)
@@ -324,11 +322,14 @@ def test_ingest_flow_counts_dead_lettered_items(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(ingest.engine, "post_content", fake_post)
 
     with get_postgres_session() as s:
-        before = s.scalar(
-            select(func.count())
-            .select_from(Item)
-            .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
-        ) or 0
+        before = (
+            s.scalar(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
+            )
+            or 0
+        )
         row = s.get(Item, item)
         assert row is not None
         row.attempts = config.MAX_SUBMIT_ATTEMPTS

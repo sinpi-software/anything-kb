@@ -158,9 +158,7 @@ def test_check_jobs_respects_the_batch_size(
     checked, however many genuinely outstanding rows exist in the table."""
     make_item("pending")
     monkeypatch.setattr(jobs.config, "JOBS_BATCH_SIZE", 0)
-    monkeypatch.setattr(
-        engine, "job_status", lambda job_id: pytest.fail("should not be called: batch size is 0")
-    )
+    monkeypatch.setattr(engine, "job_status", lambda job_id: pytest.fail("should not be called: batch size is 0"))
     result = jobs.check_jobs()
     assert result["checked"] == 0
 
@@ -169,9 +167,7 @@ def test_a_failing_status_call_does_not_sink_the_run(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:
     item_id, _job_id = make_item("pending")
-    monkeypatch.setattr(
-        engine, "job_status", lambda job_id: (_ for _ in ()).throw(engine.EngineError("HTTP 500"))
-    )
+    monkeypatch.setattr(engine, "job_status", lambda job_id: (_ for _ in ()).throw(engine.EngineError("HTTP 500")))
     jobs.check_jobs()  # must not raise
     with get_postgres_session() as s:
         row = s.get(Item, item_id)

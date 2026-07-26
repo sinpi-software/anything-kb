@@ -107,14 +107,15 @@ def ingest_items() -> dict[str, int]:
         # Dead-lettered items fall out of the WHERE clause above entirely, so without
         # this a pipeline with hundreds of dead-lettered items reports identically to
         # an idle, healthy one. Surfaced, per the design, rather than re-driven forever.
-        dead_lettered = session.scalar(
-            select(func.count())
-            .select_from(Item)
-            .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
-        ) or 0
-    logger.info(
-        "ingest: %d considered, %d submitted, %d dead-lettered", len(pending), submitted, dead_lettered
-    )
+        dead_lettered = (
+            session.scalar(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id.is_(None), Item.attempts >= config.MAX_SUBMIT_ATTEMPTS)
+            )
+            or 0
+        )
+    logger.info("ingest: %d considered, %d submitted, %d dead-lettered", len(pending), submitted, dead_lettered)
     return {"considered": len(pending), "submitted": submitted, "dead_lettered": dead_lettered}
 
 

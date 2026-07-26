@@ -6,14 +6,6 @@ Content in → per-org relevance filter → typed entity/relationship extraction
 
 - Copy `.env.sample` to `.env` and set `INGESTION_OPENROUTER_API_KEY`.
 
-## Setup
-
-```bash
-uv sync
-uv run alembic upgrade head
-uv run python seed.py   # creates the default org + config and prints an API key (once)
-```
-
 ## Run
 
 The whole stack, in Docker, with reload:
@@ -28,17 +20,21 @@ docker compose --profile ui up       # the above plus both frontends
 - desk UI — http://localhost:5173, reader — http://localhost:5174
 
 `docker compose restart ingestion-api` restarts one service; `docker compose logs -f
-ingestion-worker` follows one. Editing a `.py` file reloads the API in place. A
-dependency change needs only a restart — each service re-runs `uv sync --frozen` on
-start — never a rebuild.
+ingestion-worker` follows one. Editing a `.py` file reloads the API in place. Editing
+`pyproject.toml` needs `uv lock` run on the host first — each service runs `uv sync
+--frozen`, which refuses to update the lockfile itself — then a `restart` picks it up,
+no rebuild needed. `restart` does not re-read `env_file` changes, though: editing
+`.env.local` needs `docker compose up -d <service>` instead.
 
-First run needs an API key: `docker compose exec ingestion-api python seed.py`.
+First run needs an API key: `docker compose exec ingestion-api python seed.py`. Paste
+the key it prints into `.env.local` as `NEONEWS_ENGINE_API_KEY`.
 
 To run against the host instead (Postgres, Neo4j and Prefect stay in Docker):
 
 ```bash
 docker compose up -d postgres neo4j prefect
 uv sync && uv run alembic upgrade head
+uv run python seed.py              # creates the default org + config and prints an API key (once)
 uv run uvicorn main:app --reload   # HTTP API + GraphQL on :8000
 uv run python worker.py            # separate process: drains ingest_jobs
 ```

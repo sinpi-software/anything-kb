@@ -117,3 +117,56 @@ def test_scoped_graphql_requires_membership(client: TestClient) -> None:
     finally:
         _purge_user(email)
 
+
+def _plant_graph_nodes(kb_id: str, count: int = 2) -> None:
+    """Create throwaway Entity nodes tagged with `kb_id`, mirroring test_routes_knowledge_bases.py."""
+    from neo4j_client import get_driver
+
+    with get_driver().session() as s:
+        for _ in range(count):
+            s.run(
+                "CREATE (:Entity {id: $id, knowledge_base_id: $kb, name: 'planted', type: 'Topic'})",
+                id=str(uuid.uuid4()), kb=kb_id,
+            ).consume()
+
+
+@requires_stack
+def test_scoped_graphql_uppercase_uuid_reads_the_canonical_graph_nodes(client: TestClient) -> None:
+    """`require_membership` accepts a non-canonical UUID (uppercase, dash-less) because
+    Postgres canonicalizes on uuid cast, but Neo4j nodes carry the canonical
+    lowercase-dashed form and graph_read does an exact Cypher string comparison.
+    Querying via an uppercased id must still return the knowledge base's real nodes —
+    not silently resolve to `{"nodes": []}`, indistinguishable from a genuinely empty
+    knowledge base."""
+    from neo4j_client import purge_knowledge_base
+
+    email = _unique_email()
+    kb_id = None
+    try:
+        client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+        from accounts import home_knowledge_base_id
+        from db import get_postgres_session
+        from models import User
+
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            found_kb_id = home_knowledge_base_id(s, user.id)
+            assert found_kb_id is not None
+            kb_id = found_kb_id
+
+        _plant_graph_nodes(kb_id)
+
+        resp = client.post(
+            f"/api/knowledge-bases/{kb_id.upper()}/graphql",
+            json={"query": "{ nodes { id name } }"},
+            headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "errors" not in body, body
+        assert len(body["data"]["nodes"]) == 2
+    finally:
+        if kb_id is not None:
+            purge_knowledge_base(kb_id)
+        _purge_user(email)
+

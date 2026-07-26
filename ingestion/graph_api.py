@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 import strawberry
@@ -162,6 +163,12 @@ async def get_scoped_cookie_context(
     passes it explicitly. Reading the graph needs `reader`."""
     with get_postgres_session() as session:
         require_membership(session, user.id, kb_id, "reader")
+        # Canonicalize after the authorization check: Postgres matches uppercase and
+        # dash-less UUID forms on cast, but graph_read does exact Cypher string
+        # comparison against the canonical lowercase-dashed form nodes carry. A
+        # non-canonical id here would silently read zero nodes from a populated
+        # knowledge base instead of erroring. Mirrors routes_knowledge_bases.delete.
+        kb_id = str(uuid.UUID(kb_id))
     return {"knowledge_base_id": kb_id}
 
 

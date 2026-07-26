@@ -29,8 +29,13 @@ def seed_database() -> None:
     from argon2 import PasswordHasher
 
     from db import get_postgres_session
-    from memberships import create_knowledge_base
-    from models import KnowledgeBase, User
+    from memberships import (
+        DEFAULT_ENTITY_TYPES,
+        DEFAULT_INTERESTS,
+        DEFAULT_RELATIONSHIP_TYPES,
+        create_knowledge_base,
+    )
+    from models import KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, KnowledgeBaseUserRole, User
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
@@ -60,7 +65,48 @@ def seed_database() -> None:
             knowledge_base = create_knowledge_base(
                 session, admin, "Default Knowledge Base", charter="This is the default knowledge base."
             )
-        membership_created = config_created = org_created
+            membership_created = config_created = True
+        else:
+            # The knowledge base already existed, but its membership or config may not
+            # have — e.g. a prior run was interrupted between the three inserts that
+            # create_knowledge_base makes together. Repair whichever piece is missing
+            # instead of assuming the knowledge base's existence implies the rest does.
+            membership = (
+                session.query(KnowledgeBaseUser)
+                .filter(
+                    KnowledgeBaseUser.knowledge_base_id == knowledge_base.id,
+                    KnowledgeBaseUser.user_id == admin.id,
+                )
+                .one_or_none()
+            )
+            membership_created = membership is None
+            if membership is None:
+                session.add(
+                    KnowledgeBaseUser(
+                        knowledge_base_id=knowledge_base.id,
+                        user_id=admin.id,
+                        role=KnowledgeBaseUserRole.OWNER.value,
+                        created_by_id=admin.id,
+                        updated_by_id=admin.id,
+                    )
+                )
+
+            config = (
+                session.query(KnowledgeBaseConfig)
+                .filter(KnowledgeBaseConfig.knowledge_base_id == knowledge_base.id)
+                .one_or_none()
+            )
+            config_created = config is None
+            if config is None:
+                session.add(
+                    KnowledgeBaseConfig(
+                        knowledge_base_id=knowledge_base.id,
+                        interests=DEFAULT_INTERESTS,
+                        discover_types=True,
+                        entity_types=DEFAULT_ENTITY_TYPES,
+                        relationship_types=DEFAULT_RELATIONSHIP_TYPES,
+                    )
+                )
 
         from auth import generate_api_key, hash_key
         from models import ApiKey

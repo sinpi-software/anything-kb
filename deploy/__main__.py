@@ -330,6 +330,89 @@ api_svc = k8s.core.v1.Service(
     opts=pulumi.ResourceOptions(depends_on=[api_deploy]),
 )
 
+
+# --- neonews (the automated newsroom; an external consumer of the engine API) ---
+neonews_image = cfg.require("neonewsImage")  # e.g. localhost:5000/anything-neonews:<tag>
+# Which knowledge base neonews reads and writes is decided by WHICH key you set here.
+neonews_engine_api_key = cfg.require_secret("neonewsEngineApiKey")
+
+# Keys are exactly the env var names neonews/config.py reads.
+neonews_secret = k8s.core.v1.Secret(
+    "neonews-secret",
+    metadata=meta("neonews-secret"),
+    string_data={
+        "NEONEWS_POSTGRES_URL": pulumi.Output.concat(
+            "postgresql://ingestion:", pg_password, "@postgres:5432/ingestion"
+        ),
+        "NEONEWS_ENGINE_URL": "http://ingestion-api",
+        "NEONEWS_ENGINE_API_KEY": neonews_engine_api_key,
+        "NEONEWS_OPENROUTER_API_KEY": openrouter_key,
+        "PREFECT_API_URL": "http://prefect:4200/api",
+    },
+    opts=ns_opts,
+)
+
+# neonews owns its own Alembic chain (version_table alembic_version_neonews) in the
+# same database, so this cannot collide with the engine's migrate Job.
+neonews_migrate = k8s.batch.v1.Job(
+    "neonews-migrate",
+    metadata=meta("neonews-migrate"),
+    spec={
+        "backoffLimit": 5,
+        "template": {
+            "spec": {
+                "restartPolicy": "Never",
+                "containers": [
+                    {
+                        "name": "migrate",
+                        "image": neonews_image,
+                        "imagePullPolicy": "Always",
+                        "command": ["alembic", "upgrade", "head"],
+                        "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                    }
+                ],
+            }
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, neonews_secret]),
+)
+
+# serve.py registers the four flow deployments and executes the runs they schedule —
+# no work pool or custom worker image needed. Gated on the migration so neonews can
+# never start against an unmigrated schema, and on Prefect so registration has an API
+# to talk to. If Prefect is unreachable the pod crashloops, which is the honest failure.
+neonews_serve = k8s.apps.v1.Deployment(
+    "neonews-serve",
+    metadata=meta("neonews-serve"),
+    spec={
+        "replicas": 1,
+        # Exactly one process may register these deployments; two would reconcile
+        # the same schedules against each other.
+        "strategy": {"type": "Recreate"},
+        "selector": {"matchLabels": {"app": "neonews-serve"}},
+        "template": {
+            "metadata": {"labels": {"app": "neonews-serve"}},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "neonews-serve",
+                        "image": neonews_image,
+                        "imagePullPolicy": "Always",
+                        "command": ["python", "serve.py"],
+                        "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                        "resources": {
+                            "requests": {"cpu": "100m", "memory": "256Mi"},
+                            "limits": {"memory": "1Gi"},
+                        },
+                    }
+                ],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[neonews_migrate, prefect_deploy, api_svc]),
+)
+
+
 # --- web frontend (React Router 8 SSR app; Node server) ---
 web_image = cfg.require("webImage")  # e.g. localhost:5000/anything-web:<tag>
 web_deploy = k8s.apps.v1.Deployment(

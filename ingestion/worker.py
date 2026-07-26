@@ -4,6 +4,7 @@ import time as time  # re-exported so tests can monkeypatch worker.time.sleep
 from datetime import UTC, datetime
 
 import dotenv
+from prefect import flow
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -151,6 +152,15 @@ def run_once() -> int:
     for job_id in job_ids:
         process_job(job_id)
     return len(job_ids)
+
+
+@flow(name="drain-jobs")
+def drain_jobs() -> dict[str, int]:
+    """One drain pass, as a Prefect flow. Scheduled on a short interval rather than
+    run as a loop: `claim_pending_job_ids` claims with FOR UPDATE SKIP LOCKED, so two
+    overlapping runs cannot claim the same job and no singleton guarantee is needed."""
+    bootstrap_schema()
+    return {"processed": run_once()}
 
 
 def main() -> None:

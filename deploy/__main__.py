@@ -287,6 +287,17 @@ prefect_svc = k8s.core.v1.Service(
 
 pulumi.export("prefect_ui", prefect_lan_url)
 
+# The URL the ingestion-worker Deployment uses to reach Prefect from inside the
+# cluster (in-cluster DNS, unlike prefect_lan_url above which is for browsers).
+# Defined here, before the engine() calls below, because engine() hardcodes its
+# own depends_on and will not wait for a secret defined after it.
+prefect_url_secret = k8s.core.v1.Secret(
+    "prefect-url-secret",
+    metadata=meta("prefect-url-secret"),
+    string_data={"PREFECT_API_URL": "http://prefect:4200/api"},
+    opts=ns_opts,
+)
+
 
 # --- api + worker ---------------------------------------------------------
 def engine(name: str, cmd: list, container_extra: dict | None = None):
@@ -321,7 +332,14 @@ api_deploy = engine(
     },
 )
 
-worker_deploy = engine("ingestion-worker", ["python", "worker.py"])
+
+# The worker is now a Prefect flow on an interval instead of a bare polling loop.
+# One process registers it, matching neonews-serve's single-registrar constraint.
+worker_deploy = engine(
+    "ingestion-worker",
+    ["python", "serve_worker.py"],
+    {"envFrom": [{"secretRef": {"name": "app-secret"}}, {"secretRef": {"name": "prefect-url-secret"}}]},
+)
 
 api_svc = k8s.core.v1.Service(
     "ingestion-api",

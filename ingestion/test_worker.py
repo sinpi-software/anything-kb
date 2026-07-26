@@ -171,6 +171,25 @@ def test_main_survives_run_once_error(monkeypatch: pytest.MonkeyPatch) -> None:
         worker.main()
 
 
+def test_drain_jobs_flow_returns_the_processed_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The flow wraps one drain pass. Prefect's `serve` schedules it on an interval;
+    the FOR UPDATE SKIP LOCKED claim in run_once is what makes overlapping runs safe,
+    so the flow needs no locking of its own."""
+    monkeypatch.setattr(worker, "run_once", lambda: 3)
+    monkeypatch.setattr(worker, "bootstrap_schema", lambda: None)
+    assert worker.drain_jobs() == {"processed": 3}
+
+
+def test_drain_jobs_flow_bootstraps_the_neo4j_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() bootstrapped the schema before looping; the flow must too, or a fresh
+    cluster's first run writes entities with no fulltext index behind them."""
+    calls: list[str] = []
+    monkeypatch.setattr(worker, "run_once", lambda: 0)
+    monkeypatch.setattr(worker, "bootstrap_schema", lambda: calls.append("bootstrap"))
+    worker.drain_jobs()
+    assert calls == ["bootstrap"]
+
+
 @requires_pg
 def test_skip_locked_prevents_double_claim(org_with_config) -> None:  # type: ignore[no-untyped-def]
     from sqlalchemy import select

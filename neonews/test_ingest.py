@@ -28,18 +28,6 @@ _HAS_POSTGRES = _postgres_available()
 requires_postgres = pytest.mark.skipif(not _HAS_POSTGRES, reason="Postgres not reachable")
 
 
-@pytest.fixture(autouse=True)
-def _clean_tables() -> Generator[None, None, None]:
-    """The flow-level tests sweep the whole `neonews_items` table. Without this, pending
-    rows legitimately left behind by earlier tests (job_id IS NULL, under the cap) get
-    swept up too, tripping their `pytest.fail` fakes. Truncate before every test."""
-    if _HAS_POSTGRES:
-        with get_postgres_session() as s:
-            s.execute(text("TRUNCATE TABLE neonews_items, neonews_sources RESTART IDENTITY CASCADE"))
-            s.commit()
-    yield
-
-
 @pytest.fixture
 def item() -> Generator[str, None, None]:
     with get_postgres_session() as s:
@@ -152,27 +140,62 @@ def test_submit_failure_bumps_attempts_and_records_the_error(monkeypatch: pytest
 @requires_postgres
 def test_ingest_flow_skips_items_over_the_attempt_cap(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """The cap is the guard against re-driving a broken item forever — the failure
-    mode that, in the prior codebase, drained the account."""
+    mode that, in the prior codebase, drained the account.
+
+    The table isn't reset between tests, so unrelated pending rows left by earlier
+    tests may also be swept here. The fail-trap is scoped to this test's own item
+    (by a label unique to its id) so those unrelated rows pass through harmlessly
+    instead of tripping it; the DB-state assertions below are the real proof that
+    *this* item was never touched.
+    """
     monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
-    monkeypatch.setattr(ingest.engine, "post_content", lambda t, m: pytest.fail("should not submit"))
+    label = f"cap-test-{item}"
+
+    def fake_post(text_: str, metadata: dict[str, Any]) -> str:
+        if metadata.get("label") == label:
+            pytest.fail("should not submit: item is over the attempt cap")
+        return "job-unrelated"  # some other pending row; not this test's concern
+
+    monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
         row = s.get(Item, item)
         assert row is not None
+        row.title = label
         row.attempts = config.MAX_SUBMIT_ATTEMPTS
         s.commit()
-    result = ingest.ingest_items()
-    assert result["submitted"] == 0
+    ingest.ingest_items()
+    with get_postgres_session() as s:
+        refreshed = s.get(Item, item)
+        assert refreshed is not None
+        assert refreshed.job_id is None
+        assert refreshed.attempts == config.MAX_SUBMIT_ATTEMPTS  # untouched: never even attempted
 
 
 @requires_postgres
 def test_ingest_flow_leaves_already_submitted_items_alone(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
-    monkeypatch.setattr(ingest.engine, "post_content", lambda t, m: pytest.fail("should not resubmit"))
+    """Proves the `job_id IS NULL` half of the sweep: an item that already has a
+    job_id is never re-submitted. See the cap test above for why the fail-trap is
+    scoped to this test's own item rather than any call at all."""
+    monkeypatch.setattr(ingest, "extract_text", lambda url: "Body.")
+    label = f"submitted-test-{item}"
+
+    def fake_post(text_: str, metadata: dict[str, Any]) -> str:
+        if metadata.get("label") == label:
+            pytest.fail("should not resubmit: item already has a job_id")
+        return "job-unrelated"
+
+    monkeypatch.setattr(ingest.engine, "post_content", fake_post)
     with get_postgres_session() as s:
         row = s.get(Item, item)
         assert row is not None
+        row.title = label
         row.job_id = "job-existing"
         s.commit()
-    assert ingest.ingest_items()["submitted"] == 0
+    ingest.ingest_items()
+    with get_postgres_session() as s:
+        refreshed = s.get(Item, item)
+        assert refreshed is not None
+        assert refreshed.job_id == "job-existing"  # unchanged
 
 
 def test_extract_text_returns_none_on_a_blocked_url(monkeypatch: pytest.MonkeyPatch) -> None:

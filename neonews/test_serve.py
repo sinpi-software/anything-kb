@@ -1,3 +1,5 @@
+import pytest
+
 import serve
 
 
@@ -21,3 +23,16 @@ def test_every_deployment_carries_its_configured_cron() -> None:
         assert len(schedules) == 1, f"{deployment.name} should carry exactly one schedule"
         assert schedules[0].schedule.cron == expected[deployment.name]
         assert schedules[0].schedule.timezone == serve.SCHEDULE_TZ
+
+
+def test_empty_cron_registers_the_deployment_with_no_schedule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local development registers the flows so they are visible and manually runnable
+    in the Prefect UI, without them firing on their own — poll/ingest/draft each spend
+    OpenRouter credits. An empty cron is how Compose asks for that."""
+    monkeypatch.setattr(serve, "POLL_CRON", "")
+    by_name = {d.name: d for d in serve.deployments()}
+
+    assert by_name["poll-sources"].schedules == []
+    # The others are untouched, so an empty cron is per-flow, not global.
+    assert len(by_name["ingest-items"].schedules) == 1
+    assert by_name["ingest-items"].schedules[0].schedule.cron == serve.INGEST_CRON

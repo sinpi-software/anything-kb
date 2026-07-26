@@ -5,7 +5,8 @@ by containerd as localhost:5000 via registries.yaml). So this program does NOT
 manage a registry or node config — the image is built+pushed out of band (see
 README) and referenced here by tag. Pulumi only deploys the workloads:
 
-  namespace + secrets → postgres + neo4j → migrate (alembic) → api + worker
+  namespace + secrets → postgres + neo4j → migrate (alembic) → prefect → api + worker
+  → neonews (only if neonewsImage and neonewsEngineApiKey are both configured)
   → cloudflared (only if a tunnel token is configured)
 
 Runs against the cluster via KUBECONFIG (fetch the node's /etc/rancher/k3s/k3s.yaml).
@@ -174,6 +175,140 @@ migrate = k8s.batch.v1.Job(
 )
 
 
+# --- prefect ---------------------------------------------------------------
+# Prefect gets its own database inside the existing postgres pod (home lab: one
+# server, several databases). By itself this Job's spec is entirely constant, so
+# once it has succeeded once `pulumi up` sees no diff and never re-runs it — that
+# is NOT idempotent-by-reapplication, it is "runs exactly once ever". The
+# `deploy/image` pod-template annotation below pins the engine's image tag, which
+# changes on every deploy, so Pulumi sees a diff on this (immutable) Job spec and
+# replaces it each time — the same mechanism that already makes the `migrate` Job
+# above re-run on every deploy. Re-running is safe because the CREATE itself is
+# guarded by a catalog check rather than relying on IF NOT EXISTS, which CREATE
+# DATABASE does not support.
+prefect_db_init = k8s.batch.v1.Job(
+    "prefect-db-init",
+    metadata=meta("prefect-db-init"),
+    spec={
+        "backoffLimit": 5,
+        "template": {
+            # Forces Pulumi to see a diff (and replace this Job) on every deploy —
+            # see the comment above. The value itself is irrelevant to the Job.
+            "metadata": {"annotations": {"deploy/image": image}},
+            "spec": {
+                "restartPolicy": "Never",
+                "containers": [
+                    {
+                        "name": "createdb",
+                        "image": "postgres:16",
+                        "command": ["sh", "-c"],
+                        "args": [
+                            'psql -h postgres -U ingestion -tc "SELECT 1 FROM pg_database WHERE datname=\'prefect\'" '
+                            '| grep -q 1 || createdb -h postgres -U ingestion prefect'
+                        ],
+                        "env": [
+                            {
+                                "name": "PGPASSWORD",
+                                "valueFrom": {"secretKeyRef": {"name": "db-secret", "key": "POSTGRES_PASSWORD"}},
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, db_secret]),
+)
+
+# The LAN address the browser-side UI must call. Prefect's UI runs in the browser,
+# so a cluster-internal name (http://prefect:4200/api) would resolve inside the
+# cluster and fail from a laptop.
+prefect_lan_url = cfg.get("prefectLanUrl") or "http://192.168.0.202:4200"
+
+prefect_secret = k8s.core.v1.Secret(
+    "prefect-secret",
+    metadata=meta("prefect-secret"),
+    string_data={
+        # Prefect 3 requires the asyncpg driver; plain postgresql:// fails at startup.
+        "PREFECT_API_DATABASE_CONNECTION_URL": pulumi.Output.concat(
+            "postgresql+asyncpg://ingestion:", pg_password, "@postgres:5432/prefect"
+        ),
+    },
+    opts=ns_opts,
+)
+
+prefect_deploy = k8s.apps.v1.Deployment(
+    "prefect",
+    metadata=meta("prefect"),
+    spec={
+        "replicas": 1,
+        # Singleton over one database — never two servers at once.
+        "strategy": {"type": "Recreate"},
+        "selector": {"matchLabels": {"app": "prefect"}},
+        "template": {
+            "metadata": {"labels": {"app": "prefect"}},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "prefect",
+                        "image": "prefecthq/prefect:3-python3.12",
+                        "command": ["prefect", "server", "start", "--host", "0.0.0.0"],
+                        "ports": [{"containerPort": 4200}],
+                        "env": [
+                            {"name": "PREFECT_SERVER_API_HOST", "value": "0.0.0.0"},
+                            {"name": "PREFECT_API_URL", "value": pulumi.Output.concat(prefect_lan_url, "/api")},
+                            {"name": "PREFECT_UI_API_URL", "value": pulumi.Output.concat(prefect_lan_url, "/api")},
+                            {
+                                "name": "PREFECT_API_DATABASE_CONNECTION_URL",
+                                "valueFrom": {
+                                    "secretKeyRef": {
+                                        "name": "prefect-secret",
+                                        "key": "PREFECT_API_DATABASE_CONNECTION_URL",
+                                    }
+                                },
+                            },
+                        ],
+                        "resources": {"requests": {"cpu": "100m", "memory": "512Mi"}, "limits": {"memory": "2Gi"}},
+                        "readinessProbe": {
+                            "httpGet": {"path": "/api/health", "port": 4200},
+                            "initialDelaySeconds": 15,
+                            "periodSeconds": 10,
+                        },
+                    }
+                ],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[prefect_db_init, prefect_secret]),
+)
+
+# LoadBalancer so k3s ServiceLB binds :4200 on the node — LAN only. Prefect has no
+# auth of its own, so it must NOT be exposed via the tunnel or a Traefik ingress.
+prefect_svc = k8s.core.v1.Service(
+    "prefect",
+    metadata=meta("prefect"),
+    spec={
+        "type": "LoadBalancer",
+        "selector": {"app": "prefect"},
+        "ports": [{"port": 4200, "targetPort": 4200}],
+    },
+    opts=pulumi.ResourceOptions(depends_on=[prefect_deploy]),
+)
+
+pulumi.export("prefect_ui", prefect_lan_url)
+
+# The URL the ingestion-worker Deployment uses to reach Prefect from inside the
+# cluster (in-cluster DNS, unlike prefect_lan_url above which is for browsers).
+# Defined here, before the engine() calls below, because engine() hardcodes its
+# own depends_on and will not wait for a secret defined after it.
+prefect_url_secret = k8s.core.v1.Secret(
+    "prefect-url-secret",
+    metadata=meta("prefect-url-secret"),
+    string_data={"PREFECT_API_URL": "http://prefect:4200/api"},
+    opts=ns_opts,
+)
+
+
 # --- api + worker ---------------------------------------------------------
 def engine(name: str, cmd: list, container_extra: dict | None = None):
     container = {
@@ -207,7 +342,14 @@ api_deploy = engine(
     },
 )
 
-worker_deploy = engine("ingestion-worker", ["python", "worker.py"])
+
+# The worker is now a Prefect flow on an interval instead of a bare polling loop.
+# One process registers it, matching neonews-serve's single-registrar constraint.
+worker_deploy = engine(
+    "ingestion-worker",
+    ["python", "serve_worker.py"],
+    {"envFrom": [{"secretRef": {"name": "app-secret"}}, {"secretRef": {"name": "prefect-url-secret"}}]},
+)
 
 api_svc = k8s.core.v1.Service(
     "ingestion-api",
@@ -215,6 +357,107 @@ api_svc = k8s.core.v1.Service(
     spec={"selector": {"app": "ingestion-api"}, "ports": [{"port": 80, "targetPort": 8000}]},
     opts=pulumi.ResourceOptions(depends_on=[api_deploy]),
 )
+
+
+# --- neonews (the automated newsroom; an external consumer of the engine API) ---
+# Both optional, fail-open — mirrors the cloudflared block below. `pulumi up`
+# must succeed even when neonews isn't configured yet (nothing sets these by
+# default; deploy.sh sets neonewsImage but the key must be configured by hand), so
+# a missing value skips neonews entirely with a warning rather than aborting the
+# whole program before anything else is created or updated.
+neonews_image = cfg.get("neonewsImage")  # e.g. localhost:5000/anything-neonews:<tag>
+# Which knowledge base neonews reads and writes is decided by WHICH key you set here.
+neonews_engine_api_key = cfg.get_secret("neonewsEngineApiKey")
+
+if neonews_image is not None and neonews_engine_api_key is not None:
+    # Keys are exactly the env var names neonews/config.py reads.
+    neonews_secret = k8s.core.v1.Secret(
+        "neonews-secret",
+        metadata=meta("neonews-secret"),
+        string_data={
+            "NEONEWS_POSTGRES_URL": pulumi.Output.concat(
+                "postgresql://ingestion:", pg_password, "@postgres:5432/ingestion"
+            ),
+            "NEONEWS_ENGINE_URL": "http://ingestion-api",
+            "NEONEWS_ENGINE_API_KEY": neonews_engine_api_key,
+            "NEONEWS_OPENROUTER_API_KEY": openrouter_key,
+            "PREFECT_API_URL": "http://prefect:4200/api",
+        },
+        opts=ns_opts,
+    )
+
+    # neonews owns its own Alembic chain (version_table alembic_version_neonews) in
+    # the same database, so this cannot collide with the engine's migrate Job.
+    neonews_migrate = k8s.batch.v1.Job(
+        "neonews-migrate",
+        metadata=meta("neonews-migrate"),
+        spec={
+            "backoffLimit": 5,
+            "template": {
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "migrate",
+                            "image": neonews_image,
+                            "imagePullPolicy": "Always",
+                            "command": ["alembic", "upgrade", "head"],
+                            "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                        }
+                    ],
+                }
+            },
+        },
+        opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, neonews_secret]),
+    )
+
+    # serve.py registers the four flow deployments and executes the runs they
+    # schedule — no work pool or custom worker image needed. Gated on the migration
+    # so neonews can never start against an unmigrated schema, and on Prefect so
+    # registration has an API to talk to. If Prefect is unreachable the pod
+    # crashloops, which is the honest failure.
+    neonews_serve = k8s.apps.v1.Deployment(
+        "neonews-serve",
+        metadata=meta("neonews-serve"),
+        spec={
+            "replicas": 1,
+            # Exactly one process may register these deployments; two would
+            # reconcile the same schedules against each other.
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": {"app": "neonews-serve"}},
+            "template": {
+                "metadata": {"labels": {"app": "neonews-serve"}},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "neonews-serve",
+                            "image": neonews_image,
+                            "imagePullPolicy": "Always",
+                            "command": ["python", "serve.py"],
+                            "envFrom": [{"secretRef": {"name": "neonews-secret"}}],
+                            "resources": {
+                                "requests": {"cpu": "100m", "memory": "256Mi"},
+                                "limits": {"memory": "1Gi"},
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+        opts=pulumi.ResourceOptions(depends_on=[neonews_migrate, prefect_deploy, api_svc]),
+    )
+else:
+    missing = [
+        name
+        for name, value in (("neonewsImage", neonews_image), ("neonewsEngineApiKey", neonews_engine_api_key))
+        if value is None
+    ]
+    pulumi.log.warn(
+        "neonews is not deployed: " + ", ".join(missing) + " unset. Set with "
+        "`pulumi config set neonewsImage <ref>` and "
+        "`pulumi config set --secret neonewsEngineApiKey <key>` to enable it."
+    )
+
 
 # --- web frontend (React Router 8 SSR app; Node server) ---
 web_image = cfg.require("webImage")  # e.g. localhost:5000/anything-web:<tag>

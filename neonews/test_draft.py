@@ -214,6 +214,27 @@ def test_untruncated_window_reports_not_truncated(monkeypatch: pytest.MonkeyPatc
     assert result["truncated"] is False
 
 
+def test_issue_body_is_persisted_to_postgres(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -> None:
+    """A CronJob pod's filesystem dies with it, so the markdown must live in the row.
+    Without this, a deployed run leaves an Issue row pointing at a path nothing can read."""
+    monkeypatch.setattr(draft.engine, "recent_sources", lambda since, limit: [_source("1", ["ada"])])
+    monkeypatch.setattr(draft, "_llm_client", lambda: object())
+    monkeypatch.setattr(draft, "write_story", lambda client, beat, cluster: Story(headline="H", body="B"))
+
+    result = draft.draft_issue()
+
+    on_disk = Path(result["path"]).read_text()
+    with get_postgres_session() as s:
+        row = s.query(Issue).order_by(Issue.generated_at.desc()).first()
+        assert row is not None
+        assert row.body is not None
+        assert "## H" in row.body
+        # The durable copy and the dev-convenience file must not diverge.
+        assert row.body == on_disk
+        s.query(Issue).filter(Issue.id == row.id).delete()
+        s.commit()
+
+
 def test_sources_query_limit_never_exceeds_the_engines_ceiling() -> None:
     """The whole truncation detection (`len(rows) >= SOURCES_QUERY_LIMIT` in draft.py)
     rests on this constant sitting AT the engine's own hard clamp (NODES_MAX_LIMIT =

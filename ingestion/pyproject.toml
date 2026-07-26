@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "neo4j>=6.2.0",
     "openrouter>=0.10.8",
+    "prefect>=3.7.0",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
     "sqlalchemy>=2.0.51",

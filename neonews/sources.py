@@ -8,18 +8,13 @@ deliberately not built against an unchosen vendor.
 from __future__ import annotations
 
 import calendar
-import hashlib as hashlib  # unused until Task 4 (file adapter dedup keys)
 import html
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path as Path  # unused until Task 4 (file adapter)
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
-
-import config as config  # unused until Task 4 (config-driven dispatch)
-import net_guard as net_guard  # unused until Task 4 (fetch call)
 
 _TRACKING_PARAMS = ("fbclid", "gclid", "mc_cid", "mc_eid")
 

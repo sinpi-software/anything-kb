@@ -19,6 +19,12 @@ FEED = b"""<?xml version="1.0"?>
     <link>https://example.com/b/</link>
     <description>Body b.</description>
   </item>
+  <item>
+    <title>Mangled link falls back to guid</title>
+    <link>&lt;a href="https://example.com/c"&gt;https://example.com/c&lt;/a&gt;</link>
+    <guid>https://example.com/c-canonical</guid>
+    <description>Body c.</description>
+  </item>
 </channel></rss>
 """
 
@@ -40,7 +46,7 @@ def test_canonicalize_url(raw: str, expected: str) -> None:
 def test_parse_feed_returns_title_and_items() -> None:
     title, items = parse_feed(FEED)
     assert title == "Example News"
-    assert len(items) == 2
+    assert len(items) == 3
 
 
 def test_parse_feed_prefers_guid_as_dedup_key() -> None:
@@ -56,6 +62,17 @@ def test_parse_feed_falls_back_to_canonical_link_as_dedup_key() -> None:
 def test_parse_feed_strips_markup_from_titles() -> None:
     _, items = parse_feed(FEED)
     assert items[1].title == "Markup in a title"
+
+
+def test_parse_feed_uses_clean_link_as_url() -> None:
+    _, items = parse_feed(FEED)
+    assert items[0].url == "https://example.com/a?utm_source=rss&id=2"
+    assert items[1].url == "https://example.com/b/"
+
+
+def test_parse_feed_falls_back_to_guid_as_url_when_link_has_embedded_markup() -> None:
+    _, items = parse_feed(FEED)
+    assert items[2].url == "https://example.com/c-canonical"
 
 
 def test_parse_feed_reads_published_at_as_utc() -> None:

@@ -4,6 +4,8 @@ Membership decides visibility and rank decides capability — see memberships.py
 refusal here is a 404, including one caused by role rather than existence.
 """
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session as OrmSession
 
@@ -121,6 +123,12 @@ def delete(
     """
     with get_postgres_session() as session:
         require_membership(session, user.id, kb_id, "owner")
+        # Canonicalize after the authorization check: Postgres matches uppercase and
+        # dash-less UUID forms on cast, but purge_knowledge_base does an exact Cypher
+        # string comparison against the canonical lowercase-dashed form nodes carry. A
+        # non-canonical id here would purge 0 graph nodes and then delete every
+        # Postgres row anyway — stranding the graph permanently.
+        kb_id = str(uuid.UUID(kb_id))
         kb = session.get(KnowledgeBase, kb_id)
         if kb is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge base not found")

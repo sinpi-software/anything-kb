@@ -3,6 +3,9 @@ import uuid
 from collections.abc import Iterator
 
 os.environ.setdefault("INGESTION_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+os.environ.setdefault("INGESTION_NEO4J_URI", "bolt://localhost:7687")
+os.environ.setdefault("INGESTION_NEO4J_USER", "neo4j")
+os.environ.setdefault("INGESTION_NEO4J_PASSWORD", "ingestion")
 
 import pytest
 from fastapi import FastAPI
@@ -21,8 +24,42 @@ def _postgres_available() -> bool:
         return False
 
 
+def _neo4j_available() -> bool:
+    try:
+        from neo4j_client import get_driver
+
+        with get_driver().session() as s:
+            s.run("RETURN 1").consume()
+        return True
+    except Exception:
+        return False
+
+
 requires_pg = pytest.mark.skipif(not _postgres_available(), reason="Postgres not reachable")
+requires_neo4j = pytest.mark.skipif(not _neo4j_available(), reason="Neo4j not reachable")
 LOCALHOST_ORIGIN = {"Origin": "http://localhost:5173"}
+
+
+def _plant_graph_nodes(kb_id: str, count: int = 2) -> None:
+    """Create throwaway Entity nodes tagged with `kb_id`, mirroring test_neo4j_purge.py."""
+    from neo4j_client import get_driver
+
+    with get_driver().session() as s:
+        for _ in range(count):
+            s.run(
+                "CREATE (:Entity {id: $id, knowledge_base_id: $kb, name: 'planted'})",
+                id=str(uuid.uuid4()), kb=kb_id,
+            ).consume()
+
+
+def _graph_node_count(kb_id: str) -> int:
+    from neo4j_client import get_driver
+
+    with get_driver().session() as s:
+        record = s.run(
+            "MATCH (n) WHERE n.knowledge_base_id = $kb RETURN count(n) AS c", kb=kb_id
+        ).single()
+        return int(record["c"]) if record is not None else 0
 
 
 @pytest.fixture
@@ -248,20 +285,31 @@ def test_delete_of_another_users_knowledge_base_is_404(client: TestClient) -> No
 
 
 @requires_pg
+@requires_neo4j
 def test_delete_is_rerunnable_after_a_graph_only_success(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The failure the Neo4j-first order is designed for: the graph purge succeeded and
     the Postgres half did not. The knowledge base is still listed and deleting again
-    converges, rather than stranding graph nodes whose owning row is gone."""
+    converges, rather than stranding graph nodes whose owning row is gone.
+
+    Plants real graph nodes so the assertion after the failed attempt is load-bearing:
+    a *reversed* implementation (Postgres first, then purge) would also fail at the
+    monkeypatched point, leave the knowledge base listed, and retry to 204 — but it
+    would do so with the graph nodes still present. Asserting they are already zero
+    right after the Postgres-side failure is only true under graph-first ordering.
+    """
     import routes_knowledge_bases
 
     email = f"kb-delretry-{uuid.uuid4()}@example.com"
+    kb_id = None
     try:
         _register_and_verify(client, email)
         kb_id = client.post(
             "/api/knowledge-bases", json={"name": "Flaky"}, headers=LOCALHOST_ORIGIN
         ).json()["id"]
+        _plant_graph_nodes(kb_id)
+        assert _graph_node_count(kb_id) == 2
 
         def boom(*args: object, **kwargs: object) -> None:
             raise RuntimeError("postgres unavailable")
@@ -273,6 +321,9 @@ def test_delete_is_rerunnable_after_a_graph_only_success(
                 json={"confirm_name": "Flaky"}, headers=LOCALHOST_ORIGIN,
             )
         assert any(kb["id"] == kb_id for kb in client.get("/api/knowledge-bases").json())
+        # The graph must already be empty here — proof the purge ran before the
+        # Postgres half failed, not merely that a retry later converges.
+        assert _graph_node_count(kb_id) == 0
 
         monkeypatch.undo()
         resp = client.request(
@@ -281,4 +332,46 @@ def test_delete_is_rerunnable_after_a_graph_only_success(
         )
         assert resp.status_code == 204
     finally:
+        if kb_id is not None:
+            from neo4j_client import purge_knowledge_base
+
+            purge_knowledge_base(kb_id)
+        _purge_everything(email)
+
+
+@requires_pg
+@requires_neo4j
+def test_delete_via_uppercase_uuid_purges_the_canonical_graph_nodes(client: TestClient) -> None:
+    """`require_membership` and Postgres both accept a non-canonical UUID (uppercase,
+    dash-less), but Neo4j nodes carry the canonical lowercase-dashed form and
+    `purge_knowledge_base` matches it with an exact string comparison. Deleting via an
+    uppercased id must still purge the graph — not silently purge zero nodes and then
+    delete the Postgres rows anyway, which would strand the graph permanently."""
+    from db import get_postgres_session
+    from models import KnowledgeBase
+
+    email = f"kb-delcase-{uuid.uuid4()}@example.com"
+    kb_id = None
+    try:
+        _register_and_verify(client, email)
+        kb_id = client.post(
+            "/api/knowledge-bases", json={"name": "Cased"}, headers=LOCALHOST_ORIGIN
+        ).json()["id"]
+        _plant_graph_nodes(kb_id)
+        assert _graph_node_count(kb_id) == 2
+
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{kb_id.upper()}",
+            json={"confirm_name": "Cased"}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 204
+        assert _graph_node_count(kb_id) == 0
+
+        with get_postgres_session() as s:
+            assert s.get(KnowledgeBase, kb_id) is None
+    finally:
+        if kb_id is not None:
+            from neo4j_client import purge_knowledge_base
+
+            purge_knowledge_base(kb_id)
         _purge_everything(email)

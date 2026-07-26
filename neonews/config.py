@@ -2,6 +2,7 @@
 
 # --- Engine (the knowledge-graph API neonews consumes) ---
 ENGINE_URL_ENV = "NEONEWS_ENGINE_URL"
+ENGINE_URL_DEFAULT = "http://localhost:8000"
 ENGINE_API_KEY_ENV = "NEONEWS_ENGINE_API_KEY"
 ENGINE_TIMEOUT_SECONDS = 30.0
 

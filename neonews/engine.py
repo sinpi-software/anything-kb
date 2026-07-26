@@ -42,7 +42,7 @@ class EngineError(Exception):
 
 @lru_cache(maxsize=1)
 def _client() -> httpx.Client:
-    base_url = getenv(config.ENGINE_URL_ENV, "http://localhost:8000")
+    base_url = getenv(config.ENGINE_URL_ENV, config.ENGINE_URL_DEFAULT)
     return httpx.Client(base_url=base_url, timeout=config.ENGINE_TIMEOUT_SECONDS)
 
 

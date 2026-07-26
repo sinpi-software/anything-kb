@@ -31,14 +31,18 @@ DRAFT_CRON = getenv(config.DRAFT_CRON_ENV, config.DRAFT_CRON_DEFAULT)
 SERVE_CONCURRENCY = int(getenv(config.SERVE_CONCURRENCY_ENV, str(config.SERVE_CONCURRENCY_DEFAULT)))
 
 
+def _schedules(cron: str) -> list[CronSchedule]:
+    """Empty cron means register the deployment with no schedule — how local
+    development gets the flows into the UI without them firing on their own."""
+    return [CronSchedule(cron=cron, timezone=SCHEDULE_TZ)] if cron else []
+
+
 def deployments() -> list[Any]:
     return [
-        poll_sources.to_deployment(name="poll-sources", schedules=[CronSchedule(cron=POLL_CRON, timezone=SCHEDULE_TZ)]),
-        ingest_items.to_deployment(
-            name="ingest-items", schedules=[CronSchedule(cron=INGEST_CRON, timezone=SCHEDULE_TZ)]
-        ),
-        check_jobs.to_deployment(name="check-jobs", schedules=[CronSchedule(cron=JOBS_CRON, timezone=SCHEDULE_TZ)]),
-        draft_issue.to_deployment(name="draft-issue", schedules=[CronSchedule(cron=DRAFT_CRON, timezone=SCHEDULE_TZ)]),
+        poll_sources.to_deployment(name="poll-sources", schedules=_schedules(POLL_CRON)),
+        ingest_items.to_deployment(name="ingest-items", schedules=_schedules(INGEST_CRON)),
+        check_jobs.to_deployment(name="check-jobs", schedules=_schedules(JOBS_CRON)),
+        draft_issue.to_deployment(name="draft-issue", schedules=_schedules(DRAFT_CRON)),
     ]
 
 

@@ -35,6 +35,223 @@ services:
       retries: 10
       start_period: 30s
 
+  # Prefect's server fails at startup against a database that does not exist, and
+  # Compose has no equivalent of the cluster's init Job. Idempotent: the catalog
+  # check makes repeated `up` runs safe.
+  prefect-db-init:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ingestion
+    entrypoint:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U ingestion -d ingestion -tAc "SELECT 1 FROM pg_database WHERE datname='prefect'" | grep -q 1 \
+          || psql -h postgres -U ingestion -d ingestion -c "CREATE DATABASE prefect"
+    restart: "no"
+
+  prefect:
+    image: prefecthq/prefect:3-python3.12
+    container_name: ingestion-prefect
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prefect-db-init:
+        condition: service_completed_successfully
+    environment:
+      # Prefect 3 requires the asyncpg driver; the plain postgresql:// scheme
+      # fails at server startup. asyncpg 0.31.0 ships in this image.
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://ingestion:ingestion@postgres:5432/prefect
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      # Browser-side. A Compose service name resolves only inside the network, so
+      # the UI would load and every request it makes would fail.
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    healthcheck:
+      # The image has no curl or wget, so the check goes through Python.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  ingestion-migrate:
+    build: ./ingestion
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    volumes:
+      - ./ingestion:/app
+    # uv sync re-syncs /opt/venv against the bind-mounted lockfile, so a dependency
+    # change is `docker compose restart`, never `docker compose build`.
+    command: sh -c "uv sync --frozen --no-dev && exec alembic upgrade head"
+    restart: "no"
+
+  ingestion-api:
+    build: ./ingestion
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      INGESTION_NEO4J_URI: bolt://neo4j:7687
+      INGESTION_NEO4J_USER: neo4j
+      INGESTION_NEO4J_PASSWORD: ingestion
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ingestion:/app
+    command: sh -c "uv sync --frozen --no-dev && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+  ingestion-worker:
+    build: ./ingestion
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      prefect:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      INGESTION_NEO4J_URI: bolt://neo4j:7687
+      INGESTION_NEO4J_USER: neo4j
+      INGESTION_NEO4J_PASSWORD: ingestion
+      PREFECT_API_URL: http://prefect:4200/api
+      # 15s rather than the cluster's 60s: the reason for 60 there is scheduler
+      # exhaust on a shared 10Gi PVC, which a local volume `down -v` resets.
+      INGESTION_DRAIN_INTERVAL_SECONDS: "15"
+    volumes:
+      - ./ingestion:/app
+    command: sh -c "uv sync --frozen --no-dev && exec python serve_worker.py"
+
+  neonews-migrate:
+    build: ./neonews
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    volumes:
+      - ./neonews:/app
+    # Its own Alembic chain uses version_table="alembic_version_neonews", so the two
+    # chains in this one database cannot stamp over each other.
+    command: sh -c "uv sync --frozen --no-dev && exec alembic upgrade head"
+    restart: "no"
+
+  neonews-serve:
+    build: ./neonews
+    restart: unless-stopped
+    depends_on:
+      prefect:
+        condition: service_healthy
+      neonews-migrate:
+        condition: service_completed_successfully
+      ingestion-api:
+        condition: service_started
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      NEONEWS_ENGINE_URL: http://ingestion-api:8000
+      PREFECT_API_URL: http://prefect:4200/api
+      # Empty cron means registered but unscheduled. poll/ingest/draft each call
+      # OpenRouter, so a stack left running while editing would spend credits for
+      # nothing. Trigger runs from the UI instead.
+      NEONEWS_POLL_CRON: ""
+      NEONEWS_INGEST_CRON: ""
+      NEONEWS_JOBS_CRON: ""
+      NEONEWS_DRAFT_CRON: ""
+    volumes:
+      - ./neonews:/app
+    command: sh -c "uv sync --frozen --no-dev && exec python serve.py"
+
+  # `profiles` keeps these out of a bare `docker compose up`. Start them with:
+  #   docker compose --profile ui up
+  app:
+    profiles: ["ui"]
+    image: node:24-alpine
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      ingestion-api:
+        condition: service_started
+    environment:
+      # auth.server.ts defaults this to the cluster-internal service name, which
+      # resolves nowhere locally.
+      INTERNAL_API_URL: http://ingestion-api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./app:/app
+      # pnpm writes a symlinked virtual store into node_modules/.pnpm, and those
+      # symlinks do not survive a bind mount. A named volume shadows the host's.
+      - app-node-modules:/app/node_modules
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --store-dir /app/node_modules/.pnpm-store && exec pnpm dev --host 0.0.0.0 --port 5173"
+
+  neonews-site:
+    profiles: ["ui"]
+    image: node:24-alpine
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neonews-migrate:
+        condition: service_completed_successfully
+    environment:
+      # db.server.ts reads this and nothing sets it locally — Node does not load
+      # the repo-root .env the way the Python entry points do.
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./neonews-site:/app
+      - site-node-modules:/app/node_modules
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --store-dir /app/node_modules/.pnpm-store && exec pnpm dev --host 0.0.0.0 --port 5174"
+
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy
   # Then open ./schemaspy/output/index.html
@@ -53,3 +270,5 @@ services:
 volumes:
   ingestion-pgdata:
   ingestion-neo4jdata:
+  app-node-modules:
+  site-node-modules:

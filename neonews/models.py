@@ -64,6 +64,9 @@ class Issue(_BaseModel):
     covers_since: Mapped[datetime] = mapped_column(_TS, nullable=False)
     path: Mapped[str] = mapped_column(TEXT, nullable=False)
     story_count: Mapped[int] = mapped_column(INTEGER, nullable=False)
+    # The rendered markdown. `path` is a dev convenience that dies with the pod;
+    # this is the durable copy.
+    body: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
 
 class JobState(Base):

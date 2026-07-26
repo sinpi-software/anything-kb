@@ -146,6 +146,7 @@ def draft_issue() -> dict[str, Any]:
                 covers_since=since,
                 path=str(path),
                 story_count=len(stories),
+                body=markdown,
             )
         )
         set_watermark(session, run_start)

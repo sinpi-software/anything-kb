@@ -55,10 +55,12 @@ def _purge_user(email: str) -> None:
 def client() -> Iterator[TestClient]:
     from routes_auth import router as auth_router
     from routes_settings import router as settings_router
+    from routes_settings import scoped_router as settings_scoped_router
 
     app = FastAPI()
     app.include_router(auth_router)
     app.include_router(settings_router)
+    app.include_router(settings_scoped_router)
     yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
@@ -224,3 +226,29 @@ def test_put_config_requires_csrf_origin(client: TestClient) -> None:
 @requires_pg
 def test_config_requires_auth(client: TestClient) -> None:
     assert client.get("/api/config").status_code == 401
+
+
+@requires_pg
+def test_editor_may_read_config_but_not_write_it(client: TestClient) -> None:
+    """Config reads need reader, writes need admin."""
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    email = _unique_email()
+    try:
+        _register_and_verify(client, email)
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            membership = s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).one()
+            kb_id = str(membership.knowledge_base_id)
+            membership.role = "editor"
+            s.commit()
+        assert client.get(f"/api/knowledge-bases/{kb_id}/config").status_code == 200
+        resp = client.put(
+            f"/api/knowledge-bases/{kb_id}/config",
+            json={"interests": "x", "discover_types": True, "entity_types": [], "relationship_types": []},
+            headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 404
+    finally:
+        _purge_user(email)

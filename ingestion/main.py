@@ -17,8 +17,10 @@ from routes_config import router as config_router  # noqa: E402
 from routes_content import router as content_router  # noqa: E402
 from routes_ingest import router as ingest_router  # noqa: E402
 from routes_keys import router as keys_router  # noqa: E402
+from routes_keys import scoped_router as keys_scoped_router  # noqa: E402
 from routes_knowledge_bases import router as knowledge_bases_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
+from routes_settings import scoped_router as settings_scoped_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -61,9 +63,11 @@ app.include_router(graphql_router, prefix="/graphql")
 app.include_router(cookie_graphql_router, prefix="/api/graphql")
 app.include_router(auth_router)
 app.include_router(keys_router)
+app.include_router(keys_scoped_router)
 app.include_router(knowledge_bases_router)
 app.include_router(ingest_router)
 app.include_router(settings_router)
+app.include_router(settings_scoped_router)
 
 
 if __name__ == "__main__":

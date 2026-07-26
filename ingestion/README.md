@@ -29,6 +29,15 @@ no rebuild needed. `restart` does not re-read `env_file` changes, though: editin
 First run needs an API key: `docker compose exec ingestion-api python seed.py`. Paste
 the key it prints into `.env.local` as `NEONEWS_ENGINE_API_KEY`.
 
+The desk UI calls the engine same-origin at `/api` — in the cluster Traefik serves both
+on one host, and locally `app/vite.config.ts` proxies `/api` to the engine to match. Log
+in with `INGESTION_ADMIN_EMAIL` / `INGESTION_ADMIN_PASSWORD`.
+
+Typecheck the frontends inside their containers — `docker compose exec app pnpm
+typecheck` — not on the host. The dev server runs as root, so the `.react-router`
+types it generates into the bind mount are root-owned and a host-side run fails with
+`EACCES`. The directory is gitignored, so this never reaches a commit.
+
 To run against the host instead (Postgres, Neo4j and Prefect stay in Docker):
 
 ```bash

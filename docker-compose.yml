@@ -35,6 +35,52 @@ services:
       retries: 10
       start_period: 30s
 
+  # Prefect's server fails at startup against a database that does not exist, and
+  # Compose has no equivalent of the cluster's init Job. Idempotent: the catalog
+  # check makes repeated `up` runs safe.
+  prefect-db-init:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ingestion
+    entrypoint:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U ingestion -d ingestion -tAc "SELECT 1 FROM pg_database WHERE datname='prefect'" | grep -q 1 \
+          || psql -h postgres -U ingestion -d ingestion -c "CREATE DATABASE prefect"
+    restart: "no"
+
+  prefect:
+    image: prefecthq/prefect:3-python3.12
+    container_name: ingestion-prefect
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prefect-db-init:
+        condition: service_completed_successfully
+    environment:
+      # Prefect 3 requires the asyncpg driver; the plain postgresql:// scheme
+      # fails at server startup. asyncpg 0.31.0 ships in this image.
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://ingestion:ingestion@postgres:5432/prefect
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      # Browser-side. A Compose service name resolves only inside the network, so
+      # the UI would load and every request it makes would fail.
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    healthcheck:
+      # The image has no curl or wget, so the check goes through Python.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy
   # Then open ./schemaspy/output/index.html

@@ -51,3 +51,55 @@ def require_membership(session: OrmSession, user_id: Any, kb_id: Any, min_role: 
     if role is None or ROLE_RANK.get(role, -1) < ROLE_RANK[min_role]:
         raise not_found
     return role
+
+
+# The starting vocabulary a new knowledge base gets. Lived in seed.py until three
+# callers needed it; a knowledge base created without a config makes the worker burn
+# an LLM call discovering it has no types.
+DEFAULT_INTERESTS = "Is this content about technology, science, or business news?"
+
+DEFAULT_ENTITY_TYPES: list[dict[str, Any]] = [
+    {"name": "Person", "description": "A specific, named individual human."},
+    {"name": "Organization", "description": "A company, agency, institution, or group."},
+    {"name": "Place", "description": "A geographic location — city, country, region, or venue."},
+    {"name": "Topic", "description": "A subject, field, technology, or theme."},
+]
+
+DEFAULT_RELATIONSHIP_TYPES: list[dict[str, Any]] = [
+    {"name": "Works at", "description": "A person is employed by or leads an organization."},
+    {"name": "Located in", "description": "An entity is situated in a place."},
+    {"name": "Related to", "description": "A general association between two entities."},
+    {"name": "Founded", "description": "A person or organization established an organization."},
+]
+
+
+def create_knowledge_base(session: OrmSession, user: Any, name: str, charter: str | None = None) -> Any:
+    """A knowledge base, the creator's owner membership, and a default config.
+
+    Flushes so the caller can read `kb.id`, but does not commit — callers create a
+    knowledge base as part of a larger transaction (registration creates a user too).
+    """
+    from models import KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, KnowledgeBaseUserRole
+
+    kb = KnowledgeBase(name=name, charter=charter, created_by_id=user.id, updated_by_id=user.id)
+    session.add(kb)
+    session.flush()
+    session.add(
+        KnowledgeBaseUser(
+            knowledge_base_id=kb.id,
+            user_id=user.id,
+            role=KnowledgeBaseUserRole.OWNER.value,
+            created_by_id=user.id,
+            updated_by_id=user.id,
+        )
+    )
+    session.add(
+        KnowledgeBaseConfig(
+            knowledge_base_id=kb.id,
+            interests=DEFAULT_INTERESTS,
+            discover_types=True,
+            entity_types=DEFAULT_ENTITY_TYPES,
+            relationship_types=DEFAULT_RELATIONSHIP_TYPES,
+        )
+    )
+    return kb

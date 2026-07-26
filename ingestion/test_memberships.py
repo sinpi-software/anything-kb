@@ -124,3 +124,83 @@ def test_malformed_and_missing_ids_are_404_not_a_database_error() -> None:
                 assert excinfo.value.status_code == 404
     finally:
         _purge(user_id, kb_id)
+
+
+@requires_pg
+def test_create_knowledge_base_makes_membership_and_config() -> None:
+    """register/ and seed.py disagreed before this helper existed: register made no
+    config, so a registered user's knowledge base had none. One path, three artifacts."""
+    from db import get_postgres_session
+    from memberships import create_knowledge_base
+    from models import KnowledgeBaseConfig, KnowledgeBaseUser, User
+
+    user_id = kb_id = None
+    try:
+        with get_postgres_session() as s:
+            user = User(email=f"create-{uuid.uuid4()}@example.com", password_hash="x", name="t")
+            s.add(user)
+            s.flush()
+            kb = create_knowledge_base(s, user, "My second brain", charter="notes")
+            s.commit()
+            user_id, kb_id = str(user.id), str(kb.id)
+
+        with get_postgres_session() as s:
+            membership = s.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.knowledge_base_id == kb_id).one()
+            assert membership.role == "owner"
+            cfg = s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == kb_id).one()
+            assert cfg.interests
+            assert len(cfg.entity_types) == 4
+            assert len(cfg.relationship_types) == 4
+    finally:
+        if user_id and kb_id:
+            from db import get_postgres_session as gs
+
+            with gs() as s:
+                s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == kb_id).delete(
+                    synchronize_session=False
+                )
+                s.commit()
+            _purge(user_id, kb_id)
+
+
+@requires_pg
+def test_register_now_creates_a_config() -> None:
+    """The bug this unification fixes: a registered user's knowledge base had no config."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from db import get_postgres_session
+    from models import KnowledgeBaseConfig, KnowledgeBaseUser, User
+    from routes_auth import router as auth_router
+
+    app = FastAPI()
+    app.include_router(auth_router)
+    client = TestClient(app, base_url="https://testserver", headers={"Origin": "http://localhost:5173"})
+
+    email = f"reg-cfg-{uuid.uuid4()}@example.com"
+    try:
+        resp = client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+        assert resp.status_code == 201
+        with get_postgres_session() as s:
+            user = s.query(User).filter(User.email == email).one()
+            kb_id = s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).one()[0]
+            cfg = s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id == kb_id).one_or_none()
+        assert cfg is not None, "register must create a default config"
+    finally:
+        from test_routes_keys import _purge_user
+
+        with get_postgres_session() as s:
+            existing_user = s.query(User).filter(User.email == email).one_or_none()
+            if existing_user is not None:
+                ids = [
+                    r[0]
+                    for r in s.query(KnowledgeBaseUser.knowledge_base_id)
+                    .filter(KnowledgeBaseUser.user_id == existing_user.id)
+                    .all()
+                ]
+                if ids:
+                    s.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.knowledge_base_id.in_(ids)).delete(
+                        synchronize_session=False
+                    )
+                    s.commit()
+        _purge_user(email)

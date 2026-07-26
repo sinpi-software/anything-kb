@@ -29,7 +29,8 @@ def seed_database() -> None:
     from argon2 import PasswordHasher
 
     from db import get_postgres_session
-    from models import KnowledgeBase, KnowledgeBaseUser, KnowledgeBaseUserRole, User
+    from memberships import create_knowledge_base
+    from models import KnowledgeBase, User
 
     ph = PasswordHasher()
     admin_email = os.getenv("INGESTION_ADMIN_EMAIL", "admin@sinpi.software")
@@ -50,46 +51,19 @@ def seed_database() -> None:
         if admin_created:
             admin.created_by_id = admin.id
             admin.updated_by_id = admin.id
-        audit = {"created_by": admin, "updated_by": admin}
 
-        knowledge_base, org_created = get_or_create(
-            session,
-            KnowledgeBase,
-            defaults=dict(charter="This is the default knowledge base.", **audit),
-            name="Default Knowledge Base",
+        knowledge_base = (
+            session.query(KnowledgeBase).filter(KnowledgeBase.name == "Default Knowledge Base").one_or_none()
         )
-        _membership, membership_created = get_or_create(
-            session,
-            KnowledgeBaseUser,
-            defaults=dict(role=KnowledgeBaseUserRole.OWNER.value, **audit),
-            knowledge_base_id=knowledge_base.id,
-            user_id=admin.id,
-        )
+        org_created = knowledge_base is None
+        if knowledge_base is None:
+            knowledge_base = create_knowledge_base(
+                session, admin, "Default Knowledge Base", charter="This is the default knowledge base."
+            )
+        membership_created = config_created = org_created
 
         from auth import generate_api_key, hash_key
-        from models import ApiKey, KnowledgeBaseConfig
-
-        _cfg, config_created = get_or_create(
-            session,
-            KnowledgeBaseConfig,
-            defaults={
-                "interests": "Is this content about technology, science, or business news?",
-                "discover_types": True,
-                "entity_types": [
-                    {"name": "Person", "description": "A specific, named individual human."},
-                    {"name": "Organization", "description": "A company, agency, institution, or group."},
-                    {"name": "Place", "description": "A geographic location — city, country, region, or venue."},
-                    {"name": "Topic", "description": "A subject, field, technology, or theme."},
-                ],
-                "relationship_types": [
-                    {"name": "Works at", "description": "A person is employed by or leads an organization."},
-                    {"name": "Located in", "description": "An entity is situated in a place."},
-                    {"name": "Related to", "description": "A general association between two entities."},
-                    {"name": "Founded", "description": "A person or organization established an organization."},
-                ],
-            },
-            knowledge_base_id=knowledge_base.id,
-        )
+        from models import ApiKey
 
         existing_key = (
             session.query(ApiKey)

@@ -78,17 +78,21 @@ def _register_and_verify(client: TestClient, email: str) -> None:
 
 
 @requires_pg
-def test_get_config_is_empty_for_fresh_account(client: TestClient) -> None:
+def test_get_config_has_the_default_vocabulary_for_a_fresh_account(client: TestClient) -> None:
+    """register now creates a default config via create_knowledge_base — a fresh account
+    is no longer configless, it starts with the default interests and types."""
+    from memberships import DEFAULT_ENTITY_TYPES, DEFAULT_INTERESTS, DEFAULT_RELATIONSHIP_TYPES
+
     email = _unique_email()
     try:
         _register_and_verify(client, email)
         resp = client.get("/api/config")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["interests"] == ""
+        assert body["interests"] == DEFAULT_INTERESTS
         assert body["discover_types"] is True
-        assert body["entity_types"] == []
-        assert body["relationship_types"] == []
+        assert [t["name"] for t in body["entity_types"]] == [t["name"] for t in DEFAULT_ENTITY_TYPES]
+        assert [t["name"] for t in body["relationship_types"]] == [t["name"] for t in DEFAULT_RELATIONSHIP_TYPES]
     finally:
         _purge_user(email)
 

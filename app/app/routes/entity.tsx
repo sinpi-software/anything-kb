@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { SiteHeader } from "~/components/site-header";
 import { Button } from "~/components/ui/button";
 import { logout } from "~/lib/api";
-import { getEntity, getMe } from "~/lib/auth.server";
+import { KbNotFound, getEntity, getMe } from "~/lib/auth.server";
 import { appNavLinks } from "~/lib/nav";
 import type { Route } from "./+types/entity";
 
@@ -17,9 +17,14 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
   if (!me) throw redirect(`/login?next=/app/${params.kbId}/entity/${params.id}`);
-  const entity = await getEntity(request, params.id);
-  if (!entity) throw new Response("Not found", { status: 404 });
-  return { me, entity, kbId: params.kbId };
+  try {
+    const entity = await getEntity(request, params.kbId, params.id);
+    if (!entity) throw new Response("Not found", { status: 404 });
+    return { me, entity, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 function formatDate(value: string): string {
@@ -87,7 +92,7 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
                   <span className="font-display text-sm text-muted sm:w-40 sm:flex-none">{type}</span>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {edges.map((e) => (
-                      <Link key={e.target.id} to={`/app/entity/${e.target.id}`} className="text-accent hover:underline">
+                      <Link key={e.target.id} to={`/app/${kbId}/entity/${e.target.id}`} className="text-accent hover:underline">
                         {e.target.name} <span className="text-muted">· {e.target.type}</span>
                       </Link>
                     ))}
@@ -108,7 +113,7 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
                   <span className="font-display text-sm text-muted sm:w-40 sm:flex-none">{type}</span>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {ents.map((e) => (
-                      <Link key={e.id} to={`/app/entity/${e.id}`} className="text-accent hover:underline">
+                      <Link key={e.id} to={`/app/${kbId}/entity/${e.id}`} className="text-accent hover:underline">
                         {e.name}
                       </Link>
                     ))}

@@ -35,8 +35,8 @@ function colorForType(type: string): string {
   return PALETTE[sum % PALETTE.length];
 }
 
-async function fetchGraph(search: string): Promise<GraphData> {
-  const res = await fetch("/api/graphql", {
+async function fetchGraph(kbId: string, search: string): Promise<GraphData> {
+  const res = await fetch(`/api/knowledge-bases/${kbId}/graphql`, {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
@@ -66,7 +66,7 @@ function readColors() {
   };
 }
 
-export function GraphExplorer() {
+export function GraphExplorer({ kbId }: { kbId: string }) {
   const navigate = useNavigate();
   // react-force-graph-2d is browser-only (canvas), so it's dynamically imported on the client.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,17 +108,20 @@ export function GraphExplorer() {
     return () => observer.disconnect();
   }, []);
 
-  const load = useCallback(async (term: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await fetchGraph(term));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't load the graph.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (term: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        setData(await fetchGraph(kbId, term));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't load the graph.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [kbId],
+  );
 
   useEffect(() => {
     load("");
@@ -181,7 +184,7 @@ export function GraphExplorer() {
             linkDirectionalArrowLength={3}
             linkDirectionalArrowRelPos={1}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onNodeClick={(node: any) => navigate(`/app/entity/${node.id}`)}
+            onNodeClick={(node: any) => navigate(`/app/${kbId}/entity/${node.id}`)}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
               ctx.beginPath();

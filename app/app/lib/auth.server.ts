@@ -86,20 +86,22 @@ export async function listKnowledgeBases(request: Request): Promise<KnowledgeBas
   }
 }
 
-export async function getEntity(request: Request, id: string): Promise<EntityPage | null> {
+export async function getEntity(request: Request, kbId: string, id: string): Promise<EntityPage | null> {
   const query =
     "query($id: ID!) { node(id: $id) { id name type summary article " +
     "edges { type target { id name type } } related { id name type } references { label date } } }";
   try {
-    const res = await fetch(`${INTERNAL_API_URL}/api/graphql`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/knowledge-bases/${kbId}/graphql`, {
       method: "POST",
       headers: { ...forwardCookie(request), "content-type": "application/json" },
       body: JSON.stringify({ query, variables: { id } }),
     });
+    if (res.status === 404) throw new KbNotFound();
     if (!res.ok) return null;
     const body = await res.json();
     return body?.data?.node ?? null;
-  } catch {
+  } catch (err) {
+    if (err instanceof KbNotFound) throw err;
     return null;
   }
 }

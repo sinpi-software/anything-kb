@@ -23,7 +23,7 @@ const DEFAULT_QUERY = `# Your knowledge graph, over GraphQL.
 
 // GraphiQL + its Monaco editor are browser-only and heavy, so everything is
 // dynamically imported on the client after mount (never during SSR).
-export function GraphiQLPanel() {
+export function GraphiQLPanel({ kbId }: { kbId: string }) {
   const [content, setContent] = useState<ReactNode>(null);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export function GraphiQLPanel() {
       ]);
       if (!alive) return;
       const fetcher = createGraphiQLFetcher({
-        url: "/api/graphql",
+        url: `/api/knowledge-bases/${kbId}/graphql`,
         // Same-origin, but be explicit so the session cookie always rides along.
         fetch: (input, init) => fetch(input, { ...init, credentials: "include" }),
       });
@@ -45,7 +45,7 @@ export function GraphiQLPanel() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [kbId]);
 
   return (
     <div className="graphiql-container h-[72vh] overflow-hidden rounded-xl border border-line">

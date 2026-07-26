@@ -75,7 +75,9 @@ export default function Explore({ loaderData }: Route.ComponentProps) {
           </TabButton>
         </div>
 
-        <div className="mt-6">{tab === "graph" ? <GraphExplorer /> : <GraphiQLPanel />}</div>
+        <div className="mt-6">
+          {tab === "graph" ? <GraphExplorer kbId={kbId} /> : <GraphiQLPanel kbId={kbId} />}
+        </div>
       </main>
     </div>
   );

@@ -104,7 +104,7 @@ function StatusCard({ phase }: { phase: Phase }) {
 export default function Ingest({ loaderData }: Route.ComponentProps) {
   const { me, kbId } = loaderData;
   const navigate = useNavigate();
-  const knowledgeBase = me.knowledge_bases[0];
+  const knowledgeBase = me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId);
 
   const [text, setText] = useState("");
   const [source, setSource] = useState("");
@@ -130,7 +130,7 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
       if (!mounted.current) return;
       let job;
       try {
-        job = await getJob(jobId);
+        job = await getJob(kbId, jobId);
       } catch (err) {
         setPhase({ kind: "error", message: err instanceof ApiError ? err.message : "Lost track of that job." });
         return;
@@ -149,7 +149,7 @@ export default function Ingest({ loaderData }: Route.ComponentProps) {
     if (!canSubmit) return;
     setPhase({ kind: "working", label: "Queuing…" });
     try {
-      const { job_id } = await ingestContent(text, source.trim() || undefined);
+      const { job_id } = await ingestContent(kbId, text, source.trim() || undefined);
       await pollJob(job_id);
     } catch (err) {
       setPhase({ kind: "error", message: err instanceof ApiError ? err.message : "Couldn't ingest that." });

@@ -95,13 +95,14 @@ export interface JobStatus {
   error: string | null;
 }
 
-export const ingestContent = (text: string, source?: string): Promise<JobAccepted> =>
-  apiFetch<JobAccepted>("/content", {
+export const ingestContent = (kbId: string, text: string, source?: string): Promise<JobAccepted> =>
+  apiFetch<JobAccepted>(`/knowledge-bases/${kbId}/content`, {
     method: "POST",
     body: JSON.stringify({ text, metadata: source ? { source } : {} }),
   });
 
-export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>(`/content/${jobId}`);
+export const getJob = (kbId: string, jobId: string): Promise<JobStatus> =>
+  apiFetch<JobStatus>(`/knowledge-bases/${kbId}/content/${jobId}`);
 
 export const updateConfig = (kbId: string, config: KbConfig): Promise<KbConfig> =>
   apiFetch<KbConfig>(`/knowledge-bases/${kbId}/config`, {

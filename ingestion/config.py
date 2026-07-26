@@ -7,6 +7,9 @@ LLM_MODEL = "openai/gpt-5-nano"
 # The salience/type-admission gate (consolidate_types) runs on a more capable model:
 # it is low-volume (once per novel type) and is the sole guard against fragment types.
 TYPE_GATE_MODEL = "openai/gpt-5-mini"
+# The precision-critical entity-resolution merge check runs on a more capable model: it is
+# batched (once per item) and a wrong merge fuses two unrelated subjects into one node.
+RESOLUTION_MODEL = "openai/gpt-5-mini"
 # Per-request timeout. Without it a stuck reasoning model hangs the worker forever.
 LLM_TIMEOUT_MS = 90_000
 # Max concurrent OpenRouter calls, enforced by a threading.Semaphore in knowledge._chat.

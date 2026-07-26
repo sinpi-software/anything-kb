@@ -250,31 +250,36 @@ def resolve_entities_batch(
     entities: list[ExtractedEntity],
     llm_params: dict[str, Any],
 ) -> list[str | None]:
-    """For each entity, the id of the existing entity it refers to, or None if new. Entities with
-    0 or 1 candidates need no LLM; the ambiguous rest are resolved in a single batched call."""
+    """For each entity, the id of the existing entity it refers to, or None if new. Entities with no
+    candidate are new without an LLM call; every entity with a candidate is verified in a single
+    conservative batched call — a merge is never made without that check."""
     limit = config.KNOWLEDGE_RESOLUTION_CANDIDATES
     candidates = [_gather_candidates(session, knowledge_base_id, e, limit) for e in entities]
     resolved: list[str | None] = []
-    ambiguous: list[int] = []
+    to_resolve: list[int] = []
     for i, cands in enumerate(candidates):
-        if len(cands) == 1:
-            resolved.append(str(cands[0]["id"]))
-        else:
-            resolved.append(None)  # 0 candidates -> new; 2+ -> decided by the batch call below
-            if cands:
-                ambiguous.append(i)
+        resolved.append(None)  # default new; a candidate merge must be LLM-verified below
+        if cands:
+            to_resolve.append(i)
 
-    if ambiguous:
+    if to_resolve:
         blocks = [
             f"[{i}] {entities[i].name} ({entities[i].type}) — {entities[i].description}\n"
             + "\n".join(f"    - id={c['id']}: {c['name']} — {c['summary']}" for c in candidates[i])
-            for i in ambiguous
+            for i in to_resolve
         ]
         messages = [
             {
                 "role": "system",
-                "content": "For each numbered new entity, decide whether it is the SAME as one of its listed "
-                "candidates. Return that candidate's id, or NEW if none match.",
+                "content": (
+                    "For each numbered entity below, decide whether it is UNMISTAKABLY the same "
+                    "real-world entity as one of its listed candidates — the same specific person, "
+                    "place, organization, work, or event, not merely the same type or a related "
+                    "topic. Return that candidate's id ONLY when you are sure they are the same "
+                    "thing. If they are different things that share a name or category, or you are "
+                    "unsure, return NEW. Creating a new node is always safe; fusing two different "
+                    "subjects is not."
+                ),
             },
             {"role": "user", "content": "\n\n".join(blocks)},
         ]
@@ -288,7 +293,7 @@ def resolve_entities_batch(
         }
         content = _chat(client, model, messages, llm_params, schema)
         if content:
-            valid = {i: {str(c["id"]) for c in candidates[i]} for i in ambiguous}
+            valid = {i: {str(c["id"]) for c in candidates[i]} for i in to_resolve}
             for r in _BatchResolution.model_validate_json(content).resolutions:
                 if r.index in valid and r.id in valid[r.index]:  # ignore hallucinated ids / "NEW"
                     resolved[r.index] = r.id
@@ -614,7 +619,9 @@ def merge_content(
             if canonical is not None:
                 e.type = canonical  # normalize to the configured casing before storing
                 entities.append(e)
-        resolved_ids = resolve_entities_batch(neo, client, config.LLM_MODEL, knowledge_base_id, entities, llm_params)
+        resolved_ids = resolve_entities_batch(
+            neo, client, config.RESOLUTION_MODEL, knowledge_base_id, entities, llm_params
+        )
         for entity, existing_id in zip(entities, resolved_ids, strict=True):
             if existing_id is None:
                 entity_id = str(uuid.uuid4())

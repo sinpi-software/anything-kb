@@ -309,11 +309,29 @@ def test_resolve_batch_multi_candidate_hallucinated_answer_returns_none() -> Non
     assert client.chat.send_called
 
 
-def test_resolve_batch_single_candidate_skips_llm() -> None:
+def test_resolve_batch_single_candidate_is_verified_and_can_merge() -> None:
+    # A single candidate no longer auto-merges; the resolver is consulted and may confirm it.
     session = _FakeNeoSession([{"id": "a", "name": "Ada", "summary": "s1"}])
-    client = _FakeResolutionClient("unused")
+    client = _FakeResolutionClient('{"resolutions": [{"index": 0, "id": "a"}]}')
     assert _resolve_batch(session, client) == ["a"]
-    assert not client.chat.send_called
+    assert client.chat.send_called
+
+
+def test_resolve_batch_single_candidate_different_subject_stays_new() -> None:
+    # The bug this fixes: a single (weak) candidate that is a DIFFERENT subject must NOT merge.
+    # The resolver answers NEW, which is not among the candidate ids, so the entity becomes new.
+    session = _FakeNeoSession([{"id": "a", "name": "Ada", "summary": "an unrelated thing"}])
+    client = _FakeResolutionClient('{"resolutions": [{"index": 0, "id": "NEW"}]}')
+    assert _resolve_batch(session, client) == [None]
+    assert client.chat.send_called
+
+
+def test_resolve_batch_resolver_empty_leaves_candidate_new() -> None:
+    # If the resolver returns nothing, a candidate-having entity is created new — never wrongly merged.
+    session = _FakeNeoSession([{"id": "a", "name": "Ada", "summary": "s1"}])
+    client = _FakeResolutionClient("")
+    assert _resolve_batch(session, client) == [None]
+    assert client.chat.send_called
 
 
 def test_resolve_batch_no_candidates_skips_llm() -> None:

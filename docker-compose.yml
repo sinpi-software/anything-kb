@@ -81,6 +81,76 @@ services:
       retries: 12
       start_period: 30s
 
+  ingestion-migrate:
+    build: ./ingestion
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.sample
+      - .env.local
+      - .env
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    volumes:
+      - ./ingestion:/app
+    # uv sync re-syncs /opt/venv against the bind-mounted lockfile, so a dependency
+    # change is `docker compose restart`, never `docker compose build`.
+    command: sh -c "uv sync --frozen --no-dev && exec alembic upgrade head"
+    restart: "no"
+
+  ingestion-api:
+    build: ./ingestion
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env.sample
+      - .env.local
+      - .env
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      INGESTION_NEO4J_URI: bolt://neo4j:7687
+      INGESTION_NEO4J_USER: neo4j
+      INGESTION_NEO4J_PASSWORD: ingestion
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ingestion:/app
+    command: sh -c "uv sync --frozen --no-dev && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+  ingestion-worker:
+    build: ./ingestion
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      prefect:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env.sample
+      - .env.local
+      - .env
+    environment:
+      INGESTION_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      INGESTION_NEO4J_URI: bolt://neo4j:7687
+      INGESTION_NEO4J_USER: neo4j
+      INGESTION_NEO4J_PASSWORD: ingestion
+      PREFECT_API_URL: http://prefect:4200/api
+      # 15s rather than the cluster's 60s: the reason for 60 there is scheduler
+      # exhaust on a shared 10Gi PVC, which a local volume `down -v` resets.
+      INGESTION_DRAIN_INTERVAL_SECONDS: "15"
+    volumes:
+      - ./ingestion:/app
+    command: sh -c "uv sync --frozen --no-dev && exec python serve_worker.py"
+
   # On-demand DB schema docs. Generate with:
   #   docker compose --profile tools run --rm schemaspy
   # Then open ./schemaspy/output/index.html

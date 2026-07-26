@@ -10,7 +10,7 @@ from __future__ import annotations
 from prefect import flow, get_run_logger
 from sqlalchemy import or_, select
 
-import config
+import config as config  # re-exported: tests patch jobs.config.JOBS_BATCH_SIZE
 import engine
 from db import get_postgres_session
 from models import Item
@@ -24,10 +24,13 @@ def check_jobs() -> dict[str, int]:
     with get_postgres_session() as session:
         outstanding = list(
             session.scalars(
-                select(Item).where(
+                select(Item)
+                .where(
                     Item.job_id.is_not(None),
                     or_(Item.job_status.is_(None), Item.job_status.notin_(config.TERMINAL_JOB_STATUSES)),
                 )
+                .order_by(Item.created_at)
+                .limit(config.JOBS_BATCH_SIZE)
             )
         )
         for item in outstanding:

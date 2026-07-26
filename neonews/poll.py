@@ -58,6 +58,19 @@ def upsert_sources(session: Session, specs: list[SourceSpec]) -> list[str]:
     return ids
 
 
+def deactivate_removed_sources(session: Session, specs: list[SourceSpec]) -> int:
+    """Config is authoritative: a source no longer declared in neonews.toml stops
+    being polled. An UPDATE, not a delete, so an item's history (and a source's
+    failure_count) survive if it's added back later. Returns the number turned off."""
+    keep = {(spec.kind, spec.locator) for spec in specs}
+    deactivated = 0
+    for source in session.scalars(select(Source).where(Source.active.is_(True))):
+        if (source.kind, source.locator) not in keep:
+            source.active = False
+            deactivated += 1
+    return deactivated
+
+
 def store_items(session: Session, source_id: str, items: list[SourceItem]) -> list[str]:
     """Insert items, skipping ones already stored for this source. Returns the ids
     actually inserted — conflicts are skipped, so the count is genuinely new work."""
@@ -111,14 +124,17 @@ def poll_sources() -> dict[str, int]:
     specs, _ = load_config(Path(__file__).parent / config.CONFIG_FILE)
     with get_postgres_session() as session:
         upsert_sources(session, specs)
+        deactivated = deactivate_removed_sources(session, specs)
         session.commit()
         active = list(session.scalars(select(Source).where(Source.active.is_(True)).order_by(Source.created_at)))
         inserted = 0
         for source in active:
             inserted += poll_source(session, source)
             session.commit()
-    logger.info("polled %d sources, %d new items", len(active), inserted)
-    return {"sources": len(active), "inserted": inserted}
+    logger.info(
+        "polled %d sources, %d new items, %d source(s) deactivated", len(active), inserted, deactivated
+    )
+    return {"sources": len(active), "inserted": inserted, "deactivated": deactivated}
 
 
 if __name__ == "__main__":

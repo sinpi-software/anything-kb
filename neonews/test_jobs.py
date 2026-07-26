@@ -135,6 +135,23 @@ def test_does_not_repoll_a_terminal_item(
 
 
 @requires_postgres
+def test_check_jobs_respects_the_batch_size(
+    monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
+) -> None:
+    """Unbounded, this sweep issues one 30s-timeout GET per outstanding row: with the
+    engine down for a while, thousands of pending rows can occupy every serve() worker
+    slot with stalled check-jobs runs. Shrink the batch to 0 and confirm nothing is
+    checked, however many genuinely outstanding rows exist in the table."""
+    make_item("pending")
+    monkeypatch.setattr(jobs.config, "JOBS_BATCH_SIZE", 0)
+    monkeypatch.setattr(
+        engine, "job_status", lambda job_id: pytest.fail("should not be called: batch size is 0")
+    )
+    result = jobs.check_jobs()
+    assert result["checked"] == 0
+
+
+@requires_postgres
 def test_a_failing_status_call_does_not_sink_the_run(
     monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]
 ) -> None:

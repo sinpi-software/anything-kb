@@ -7,6 +7,50 @@ on:
     branches: [main]
 
 jobs:
+  neonews:
+    name: test + lint + type (neonews)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: neonews
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ingestion
+          POSTGRES_PASSWORD: ingestion
+          POSTGRES_DB: ingestion
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ingestion -d ingestion"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # neonews' tests run against their OWN database, never the engine's — the flows
+      # sweep whole tables, so sharing one is how a test reaches rows it doesn't own.
+      NEONEWS_TEST_POSTGRES_URL: postgresql://ingestion:ingestion@localhost:5432/neonews_test
+      NEONEWS_POSTGRES_URL: postgresql://ingestion:ingestion@localhost:5432/neonews_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install deps
+        run: uv sync --frozen
+      - name: Create the test database
+        run: PGPASSWORD=ingestion createdb -U ingestion -h localhost neonews_test
+      - name: Apply migrations (schema for DB-backed tests)
+        run: uv run alembic upgrade head
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy .
+      # No engine or OpenRouter credentials are set: every such call is stubbed, and a
+      # test that tried to reach either would fail here rather than spend money.
+      - name: Pytest
+        run: uv run pytest -q
+
   test:
     name: test + lint + type (ingestion)
     runs-on: ubuntu-latest

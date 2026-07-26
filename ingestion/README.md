@@ -4,7 +4,6 @@ Content in → per-org relevance filter → typed entity/relationship extraction
 
 ## Prerequisites
 
-- Postgres + Neo4j: `docker compose up -d postgres neo4j` (from the repo root)
 - Copy `.env.sample` to `.env` and set `INGESTION_OPENROUTER_API_KEY`.
 
 ## Setup
@@ -17,7 +16,29 @@ uv run python seed.py   # creates the default org + config and prints an API key
 
 ## Run
 
+The whole stack, in Docker, with reload:
+
 ```bash
+docker compose up                    # from the repo root: engine, worker, neonews, Prefect
+docker compose --profile ui up       # the above plus both frontends
+```
+
+- engine API — http://localhost:8000
+- Prefect UI — http://localhost:4200
+- desk UI — http://localhost:5173, reader — http://localhost:5174
+
+`docker compose restart ingestion-api` restarts one service; `docker compose logs -f
+ingestion-worker` follows one. Editing a `.py` file reloads the API in place. A
+dependency change needs only a restart — each service re-runs `uv sync --frozen` on
+start — never a rebuild.
+
+First run needs an API key: `docker compose exec ingestion-api python seed.py`.
+
+To run against the host instead (Postgres, Neo4j and Prefect stay in Docker):
+
+```bash
+docker compose up -d postgres neo4j prefect
+uv sync && uv run alembic upgrade head
 uv run uvicorn main:app --reload   # HTTP API + GraphQL on :8000
 uv run python worker.py            # separate process: drains ingest_jobs
 ```

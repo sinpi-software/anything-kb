@@ -60,7 +60,20 @@ uv run python draft.py     # write issues/YYYY-MM-DD-HHMM.md
 The engine's own worker must be running for submitted content to be processed
 (`cd ../ingestion && uv run python worker.py`).
 
-To run on a schedule, `uv run python serve.py` (needs `PREFECT_API_URL`).
+To run on a schedule, `uv run python serve.py` (needs `PREFECT_API_URL`). An empty
+`NEONEWS_*_CRON` registers that deployment with no schedule — how the local stack gets
+the flows into the Prefect UI without them firing on their own, since poll, ingest and
+draft each spend OpenRouter credits.
+
+Easiest path is the whole stack in Docker, from the repo root:
+
+```bash
+docker compose up
+```
+
+neonews runs as `neonews-serve`, its four flows registered unscheduled. Trigger them from
+http://localhost:4200/deployments. `docker compose restart neonews-serve` picks up a flow
+change — `serve()` has no hot reload.
 
 ## Test
 

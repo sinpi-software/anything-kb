@@ -66,8 +66,18 @@ def make_item() -> Generator[Callable[..., tuple[str, str]], None, None]:
 
 @requires_postgres
 def test_records_a_terminal_status(monkeypatch: pytest.MonkeyPatch, make_item: Callable[..., tuple[str, str]]) -> None:
-    item_id, _job_id = make_item("pending")
-    monkeypatch.setattr(engine, "job_status", lambda job_id: {"status": "done"})
+    item_id, job_id = make_item("pending")
+
+    def fake_status(job_id_arg: str) -> dict[str, str]:
+        if job_id_arg == job_id:
+            return {"status": "done"}
+        # Inert for every other row the table-wide sweep visits: `jobs.py`'s
+        # `if status:` guard treats an empty status as "no verdict yet" and
+        # leaves the row untouched, so unrelated leftover rows are never
+        # rewritten with a fabricated terminal verdict.
+        return {"status": ""}
+
+    monkeypatch.setattr(engine, "job_status", fake_status)
     jobs.check_jobs()
     with get_postgres_session() as s:
         row = s.get(Item, item_id)
@@ -81,10 +91,14 @@ def test_skipped_is_terminal_and_normal(
 ) -> None:
     """`skipped` means the engine judged the item irrelevant. That is a verdict,
     not a failure — recorded, never retried."""
-    item_id, _job_id = make_item("pending")
-    monkeypatch.setattr(
-        engine, "job_status", lambda job_id: {"status": "skipped", "relevance_reason": "off-topic"}
-    )
+    item_id, job_id = make_item("pending")
+
+    def fake_status(job_id_arg: str) -> dict[str, str]:
+        if job_id_arg == job_id:
+            return {"status": "skipped", "relevance_reason": "off-topic"}
+        return {"status": ""}  # inert for rows this test does not own
+
+    monkeypatch.setattr(engine, "job_status", fake_status)
     jobs.check_jobs()
     with get_postgres_session() as s:
         row = s.get(Item, item_id)
@@ -107,7 +121,10 @@ def test_does_not_repoll_a_terminal_item(
     def fake_status(job_id_arg: str) -> dict[str, str]:
         if job_id_arg == job_id:
             pytest.fail("should not re-poll a terminal item")
-        return {"status": "pending"}  # leave unrelated leftover rows as they were
+        # Inert, not "pending": an empty status hits `jobs.py`'s `if status:` guard
+        # and leaves the row exactly as it was, rather than overwriting whatever
+        # unrelated leftover rows' actual status happens to be with a literal string.
+        return {"status": ""}
 
     monkeypatch.setattr(engine, "job_status", fake_status)
     jobs.check_jobs()

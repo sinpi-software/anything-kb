@@ -161,3 +161,124 @@ def test_another_users_knowledge_base_is_404_everywhere(client: TestClient) -> N
     finally:
         _purge_everything(owner_email)
         _purge_everything(other_email)
+
+
+@requires_pg
+def test_delete_removes_the_knowledge_base_and_its_children(client: TestClient) -> None:
+    from db import get_postgres_session
+    from models import KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser
+
+    email = f"kb-del-{uuid.uuid4()}@example.com"
+    try:
+        _register_and_verify(client, email)
+        kb_id = client.post(
+            "/api/knowledge-bases", json={"name": "Doomed"}, headers=LOCALHOST_ORIGIN
+        ).json()["id"]
+
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{kb_id}",
+            json={"confirm_name": "Doomed"}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 204
+
+        with get_postgres_session() as s:
+            assert s.get(KnowledgeBase, kb_id) is None
+            assert s.query(KnowledgeBaseUser).filter(
+                KnowledgeBaseUser.knowledge_base_id == kb_id).count() == 0
+            assert s.query(KnowledgeBaseConfig).filter(
+                KnowledgeBaseConfig.knowledge_base_id == kb_id).count() == 0
+    finally:
+        _purge_everything(email)
+
+
+@requires_pg
+def test_delete_refuses_a_mismatched_confirm_name(client: TestClient) -> None:
+    email = f"kb-delname-{uuid.uuid4()}@example.com"
+    try:
+        _register_and_verify(client, email)
+        kb_id = client.post(
+            "/api/knowledge-bases", json={"name": "Doomed"}, headers=LOCALHOST_ORIGIN
+        ).json()["id"]
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{kb_id}",
+            json={"confirm_name": "doomed"}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 422
+        assert len(client.get("/api/knowledge-bases").json()) == 2
+    finally:
+        _purge_everything(email)
+
+
+@requires_pg
+def test_delete_refuses_the_callers_last_knowledge_base(client: TestClient) -> None:
+    """Otherwise a user can delete themselves into a state with nowhere to land."""
+    email = f"kb-dellast-{uuid.uuid4()}@example.com"
+    try:
+        _register_and_verify(client, email)
+        only = client.get("/api/knowledge-bases").json()[0]
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{only['id']}",
+            json={"confirm_name": only["name"]}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 409
+        assert len(client.get("/api/knowledge-bases").json()) == 1
+    finally:
+        _purge_everything(email)
+
+
+@requires_pg
+def test_delete_of_another_users_knowledge_base_is_404(client: TestClient) -> None:
+    owner_email = f"kb-delown-{uuid.uuid4()}@example.com"
+    other_email = f"kb-deloth-{uuid.uuid4()}@example.com"
+    try:
+        _register_and_verify(client, owner_email)
+        kb_id = client.post(
+            "/api/knowledge-bases", json={"name": "Mine"}, headers=LOCALHOST_ORIGIN
+        ).json()["id"]
+        client.post("/api/auth/logout", headers=LOCALHOST_ORIGIN)
+        _register_and_verify(client, other_email)
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{kb_id}",
+            json={"confirm_name": "Mine"}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 404
+    finally:
+        _purge_everything(owner_email)
+        _purge_everything(other_email)
+
+
+@requires_pg
+def test_delete_is_rerunnable_after_a_graph_only_success(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure the Neo4j-first order is designed for: the graph purge succeeded and
+    the Postgres half did not. The knowledge base is still listed and deleting again
+    converges, rather than stranding graph nodes whose owning row is gone."""
+    import routes_knowledge_bases
+
+    email = f"kb-delretry-{uuid.uuid4()}@example.com"
+    try:
+        _register_and_verify(client, email)
+        kb_id = client.post(
+            "/api/knowledge-bases", json={"name": "Flaky"}, headers=LOCALHOST_ORIGIN
+        ).json()["id"]
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("postgres unavailable")
+
+        monkeypatch.setattr(routes_knowledge_bases, "_delete_postgres_rows", boom)
+        with pytest.raises(RuntimeError):
+            client.request(
+                "DELETE", f"/api/knowledge-bases/{kb_id}",
+                json={"confirm_name": "Flaky"}, headers=LOCALHOST_ORIGIN,
+            )
+        assert any(kb["id"] == kb_id for kb in client.get("/api/knowledge-bases").json())
+
+        monkeypatch.undo()
+        resp = client.request(
+            "DELETE", f"/api/knowledge-bases/{kb_id}",
+            json={"confirm_name": "Flaky"}, headers=LOCALHOST_ORIGIN,
+        )
+        assert resp.status_code == 204
+    finally:
+        _purge_everything(email)

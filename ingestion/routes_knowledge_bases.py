@@ -5,13 +5,20 @@ refusal here is a 404, including one caused by role rather than existence.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session as OrmSession
 
 from accounts import current_user, require_csrf
 from db import get_postgres_session
 from memberships import create_knowledge_base, require_membership
-from models import KnowledgeBase, KnowledgeBaseUser, User
+from models import ApiKey, IngestJob, KnowledgeBase, KnowledgeBaseConfig, KnowledgeBaseUser, User
+from neo4j_client import purge_knowledge_base
 from sanitize import sanitize
-from schemas import KnowledgeBaseCreateRequest, KnowledgeBaseOut, KnowledgeBaseUpdateRequest
+from schemas import (
+    KnowledgeBaseCreateRequest,
+    KnowledgeBaseDeleteRequest,
+    KnowledgeBaseOut,
+    KnowledgeBaseUpdateRequest,
+)
 
 router = APIRouter(prefix="/api/knowledge-bases", tags=["Knowledge bases"], dependencies=[Depends(require_csrf)])
 
@@ -85,3 +92,53 @@ def update(
         return KnowledgeBaseOut(
             id=str(kb.id), name=kb.name, charter=kb.charter, role=role, created_at=kb.created_at
         )
+
+
+def _delete_postgres_rows(session: OrmSession, kb_id: str) -> None:
+    """Every child row, then the knowledge base itself.
+
+    Explicit because no knowledge_base_id foreign key declares ON DELETE CASCADE —
+    only the users.id keys on sessions and email_tokens do. Named as a seam so a test
+    can simulate the graph-succeeded / Postgres-failed split.
+    """
+    for model in (IngestJob, ApiKey, KnowledgeBaseConfig, KnowledgeBaseUser):
+        session.query(model).filter(model.knowledge_base_id == kb_id).delete(synchronize_session=False)
+    session.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).delete(synchronize_session=False)
+
+
+@router.delete("/{kb_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete(
+    kb_id: str,
+    payload: KnowledgeBaseDeleteRequest,
+    user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom
+) -> None:
+    """Permanently delete a knowledge base: its graph, then its rows.
+
+    The graph goes first deliberately. The two stores cannot be made atomic, and a
+    failure between them leaves a knowledge base that is empty but still listed and
+    still deletable — re-running converges. The reverse order strands graph nodes
+    whose owning row is gone: invisible to every query and reclaimable by nothing.
+    """
+    with get_postgres_session() as session:
+        require_membership(session, user.id, kb_id, "owner")
+        kb = session.get(KnowledgeBase, kb_id)
+        if kb is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge base not found")
+        if payload.confirm_name != kb.name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="confirm_name must match the knowledge base name exactly",
+            )
+        remaining = (
+            session.query(KnowledgeBaseUser).filter(KnowledgeBaseUser.user_id == user.id).count()
+        )
+        if remaining <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="cannot delete your only knowledge base"
+            )
+
+    purge_knowledge_base(kb_id)
+
+    with get_postgres_session() as session:
+        _delete_postgres_rows(session, kb_id)
+        session.commit()

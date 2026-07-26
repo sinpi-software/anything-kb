@@ -20,6 +20,11 @@ ENGINE_TIMEOUT_SECONDS = 30.0
 
 # --- Postgres (neonews' own state; same instance as the engine, neonews_* tables) ---
 POSTGRES_URL_ENV = "NEONEWS_POSTGRES_URL"
+# The test suite's own database, isolated from the operator's live one. Every
+# Postgres-backed test module points NEONEWS_POSTGRES_URL here before importing
+# config/db, so a sweeping test can never touch a real row.
+POSTGRES_TEST_URL_ENV = "NEONEWS_TEST_POSTGRES_URL"
+POSTGRES_TEST_URL_DEFAULT = "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
 
 # --- LLM (OpenRouter) ---
 OPENROUTER_API_KEY_ENV = "NEONEWS_OPENROUTER_API_KEY"
@@ -54,8 +59,11 @@ JOBS_BATCH_SIZE = 200
 # --- Drafting ---
 # On the first run (no watermark), cover this much history.
 DEFAULT_LOOKBACK_HOURS = 24
-# Sources requested per draft run. The engine clamps at its own NODES_MAX_LIMIT (500).
-SOURCES_QUERY_LIMIT = 200
+# Sources requested per draft run, newest first. Set to the engine's own ceiling
+# (ingestion/config.py's NODES_MAX_LIMIT) to make truncation as rare as possible: the
+# engine has no `until`/ascending-order parameter, so a truncated window's remainder
+# is simply lost (see draft.py's truncation handling) rather than picked up next run.
+SOURCES_QUERY_LIMIT = 500
 # Sources in one story cluster. A cluster larger than this is truncated, newest first,
 # so one hub entity can't pull the whole window into a single unwritable story.
 CLUSTER_MAX_SOURCES = 12

@@ -2,10 +2,17 @@ import os
 from collections.abc import Generator
 from datetime import UTC, datetime
 
-os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+# Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
+# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
+# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
+# would lose to whichever test module's `import config` happened to run first in this
+# session and already populated it from .env; assignment can't lose that race.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
+    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
+)
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 
 import poll
 from db import get_postgres_session
@@ -140,13 +147,26 @@ def test_poll_source_skips_items_with_no_text(monkeypatch: pytest.MonkeyPatch, s
 def test_deactivate_removed_sources_turns_off_rows_missing_from_config(source_ids: list[str]) -> None:
     """Config is authoritative: an operator who deletes a feed from neonews.toml must
     see it stop being polled, not keep running forever because nothing ever clears
-    `active`."""
+    `active`.
+
+    `deactivate_removed_sources` iterates every `active IS TRUE` row in the table, not
+    just this test's own — so the spec list passed in must retain every other active
+    source's (kind, locator), or this call flips `active = False` on rows this test
+    does not own (including, on the shared live database, real operator sources).
+    Fetch every currently-active row first and keep all of them except this test's
+    own, which is the one row under test here.
+    """
     spec = _spec(os.urandom(4).hex())
     with get_postgres_session() as s:
         source_id = poll.upsert_sources(s, [spec])[0]
         source_ids.append(source_id)
         s.commit()
-        deactivated = poll.deactivate_removed_sources(s, [])  # spec no longer in config
+        keep_specs = [
+            SourceSpec(kind=row.kind, locator=row.locator, title=row.title)
+            for row in s.scalars(select(Source).where(Source.active.is_(True)))
+            if str(row.id) != source_id
+        ]
+        deactivated = poll.deactivate_removed_sources(s, keep_specs)  # spec no longer in config
         s.commit()
         refreshed = s.get(Source, source_id)
     assert refreshed is not None

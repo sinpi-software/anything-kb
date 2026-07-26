@@ -32,6 +32,19 @@ Environment (repo-root `.env`):
 Edit `neonews.toml` to declare sources and the editorial beat. Config lives in git;
 runtime state lives in Postgres.
 
+### Known limitation: draft window truncation
+
+`draft-issue` asks the engine for every source since its watermark, newest first,
+capped at `SOURCES_QUERY_LIMIT` (the engine's own ceiling, `NODES_MAX_LIMIT = 500`).
+If a window ever holds more sources than that, the oldest ones in it are never
+returned and are permanently skipped — the engine has no `until` parameter or
+ascending-order option to page through the rest. When this happens, `draft-issue`
+logs an ERROR naming the uncovered window and returns `truncated: True`; nothing
+silently disappears. Fixing this for real needs an engine-side change (`ingestion/`),
+which is out of scope here — raising `SOURCES_QUERY_LIMIT` or tightening the draft
+schedule (running it more often, on a smaller window) are the only mitigations
+available from this side.
+
 ## Run
 
 ```bash

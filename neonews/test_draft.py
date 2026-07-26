@@ -1,10 +1,18 @@
+import logging
 import os
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+# Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
+# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
+# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
+# would lose to whichever test module's `import config` happened to run first in this
+# session and already populated it from .env; assignment can't lose that race.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
+    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
+)
 
 import pytest
 from sqlalchemy import text
@@ -41,12 +49,11 @@ def _source(sid: str, entity_ids: list[str]) -> dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def _isolated_watermark() -> Generator[None, None, None]:
-    """Each test needs a clean starting watermark, but this table is shared with the
-    real operator run: an autouse fixture that unconditionally deletes the row would
-    destroy the real watermark the moment anyone ran the suite, silently skipping every
-    source between the lost watermark and DEFAULT_LOOKBACK_HOURS ago on the next real
-    run — the exact unrecoverable failure draft.py itself is designed to avoid. Save
-    and restore instead of deleting outright."""
+    """Each test needs a clean starting watermark. The suite runs against its own
+    database (NEONEWS_TEST_POSTGRES_URL), so there's no real operator watermark to
+    destroy here — but save-and-restore rather than an unconditional delete costs
+    nothing and keeps this fixture correct even if it's ever pointed at a database
+    that isn't purely throwaway."""
     with get_postgres_session() as s:
         existing = s.get(JobState, config.DRAFT_WATERMARK_KEY)
         saved_ran_at = existing.ran_at if existing is not None else None
@@ -171,13 +178,17 @@ def test_all_clusters_failing_does_not_advance_the_watermark(
 
 
 @requires_postgres
-def test_truncated_window_advances_the_watermark_only_to_the_oldest_seen_source(
-    monkeypatch: pytest.MonkeyPatch, output_dir: Path
+def test_truncated_window_advances_to_run_start_and_reports_and_logs_loudly(
+    monkeypatch: pytest.MonkeyPatch, output_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The engine clamps `sources(since:)` at SOURCES_QUERY_LIMIT, newest first. If
-    that clamp truncated the window, advancing to run_start (as the un-truncated case
-    does) would skip everything older than what fit — advance only to the oldest
-    source actually seen, so the remainder is picked up next run."""
+    """The engine clamps `sources(since:)` at SOURCES_QUERY_LIMIT, newest-first, and
+    has no `until`/ascending-order parameter to page through the rest. Advancing only
+    to the oldest source seen (the prior behaviour) doesn't recover that remainder —
+    it lies *before* that oldest-seen timestamp, i.e. still out of range next run — and
+    it re-drafts the sources that DID fit into the very next window, burning a second
+    round of LLM spend on them. So truncation advances to run_start exactly like the
+    untruncated path, but must say so loudly: an ERROR log naming the uncovered window,
+    and `truncated: True` in the return dict."""
     monkeypatch.setattr(draft.config, "SOURCES_QUERY_LIMIT", 2)
     rows = [
         _source("1", ["ada"]) | {"ingestedAt": "2026-07-21T00:00:00+00:00"},
@@ -186,8 +197,20 @@ def test_truncated_window_advances_the_watermark_only_to_the_oldest_seen_source(
     monkeypatch.setattr(draft.engine, "recent_sources", lambda since, limit: rows)
     monkeypatch.setattr(draft, "_llm_client", lambda: object())
     monkeypatch.setattr(draft, "write_story", lambda client, beat, cluster: Story(headline="H", body="B"))
-    draft.draft_issue()
+    with caplog.at_level(logging.ERROR):
+        result = draft.draft_issue()
+    assert result["truncated"] is True
+    assert any("TRUNCATED" in record.message for record in caplog.records)
     with get_postgres_session() as s:
         state = s.get(JobState, config.DRAFT_WATERMARK_KEY)
         assert state is not None
-        assert state.ran_at == datetime(2026, 7, 20, tzinfo=UTC)
+        assert abs((state.ran_at - datetime.now(UTC)).total_seconds()) < 120
+
+
+@requires_postgres
+def test_untruncated_window_reports_not_truncated(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -> None:
+    monkeypatch.setattr(draft.engine, "recent_sources", lambda since, limit: [_source("1", ["ada"])])
+    monkeypatch.setattr(draft, "_llm_client", lambda: object())
+    monkeypatch.setattr(draft, "write_story", lambda client, beat, cluster: Story(headline="H", body="B"))
+    result = draft.draft_issue()
+    assert result["truncated"] is False

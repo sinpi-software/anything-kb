@@ -1,7 +1,14 @@
 import os
 from collections.abc import Callable, Generator
 
-os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+# Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
+# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
+# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
+# would lose to whichever test module's `import config` happened to run first in this
+# session and already populated it from .env; assignment can't lose that race.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
+    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
+)
 
 import pytest
 from sqlalchemy import delete, text

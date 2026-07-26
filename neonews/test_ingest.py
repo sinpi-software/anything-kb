@@ -4,7 +4,14 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
 
-os.environ.setdefault("NEONEWS_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/ingestion")
+# Point at the test suite's own database (config.POSTGRES_TEST_URL_ENV / _DEFAULT), by
+# assignment rather than setdefault: config.py loads the repo-root .env, and .env.sample
+# already sets NEONEWS_POSTGRES_URL to the operator's live database. A setdefault here
+# would lose to whichever test module's `import config` happened to run first in this
+# session and already populated it from .env; assignment can't lose that race.
+os.environ["NEONEWS_POSTGRES_URL"] = os.environ.get(
+    "NEONEWS_TEST_POSTGRES_URL", "postgresql://ingestion:ingestion@localhost:5432/neonews_test"
+)
 
 import pytest
 from sqlalchemy import delete, func, select, text
@@ -291,10 +298,29 @@ def test_extract_text_logs_the_failure(monkeypatch: pytest.MonkeyPatch, caplog: 
 
 
 @requires_postgres
-def test_ingest_flow_counts_dead_lettered_items(item: str) -> None:
+def test_ingest_flow_counts_dead_lettered_items(monkeypatch: pytest.MonkeyPatch, item: str) -> None:
     """Dead-lettered items fall out of the sweep's WHERE clause entirely, so without a
     separate count a pipeline with hundreds of them reports identically to an idle,
-    healthy one — indistinguishable from healthy. The count must be surfaced."""
+    healthy one — indistinguishable from healthy. The count must be surfaced.
+
+    This test's own item is pushed over the attempt cap below, so it is dead-lettered
+    and never eligible for the batch — this test owns no row `ingest_items()` should
+    touch. Both `extract_text` and `engine.post_content` are therefore trapped
+    unconditionally, exactly as the fail-trap in the two adjacent flow tests: any call
+    at all means a row this test does not own is being processed, which would mean a
+    real `net_guard.fetch` and a real engine POST — spending tokens and writing junk
+    into the live graph — instead of failing loudly.
+    """
+
+    def fake_extract_text(url: str) -> str | None:
+        pytest.fail(f"extract_text should not be called: this test owns no eligible item (url={url!r})")
+
+    def fake_post(text_: str, metadata: dict[str, Any]) -> str:
+        pytest.fail(f"post_content should not be called: this test owns no eligible item (metadata={metadata!r})")
+
+    monkeypatch.setattr(ingest, "extract_text", fake_extract_text)
+    monkeypatch.setattr(ingest.engine, "post_content", fake_post)
+
     with get_postgres_session() as s:
         before = s.scalar(
             select(func.count())

@@ -47,11 +47,11 @@ def _llm_client() -> OpenRouter:
     return OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV])
 
 
-def _oldest_ingested_at(rows: list[dict[str, Any]]) -> datetime:
-    """The oldest `ingestedAt` (falling back to `publishedAt`) among `rows`. Used only
-    when the engine's LIMIT truncated the window: advancing the watermark to run_start
-    would silently drop every source past the limit, so it advances only past what was
-    actually seen, and the remainder is picked up next run."""
+def _oldest_ingested_at(rows: list[dict[str, Any]]) -> datetime | None:
+    """The oldest `ingestedAt` (falling back to `publishedAt`) among `rows`, for the
+    truncation warning below — reporting only, never control flow, so a row with
+    neither field just narrows the logged boundary rather than raising. Returns None
+    if no row carries a timestamp at all."""
     timestamps = []
     for row in rows:
         raw = row.get("ingestedAt") or row.get("publishedAt")
@@ -61,9 +61,7 @@ def _oldest_ingested_at(rows: list[dict[str, Any]]) -> datetime:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         timestamps.append(dt)
-    if not timestamps:
-        raise ValueError("truncated window but no row carries ingestedAt/publishedAt")
-    return min(timestamps)
+    return min(timestamps) if timestamps else None
 
 
 @task(name="write-story")
@@ -91,6 +89,28 @@ def draft_issue() -> dict[str, Any]:
     clusters = cluster_sources(rows, config.CLUSTER_MAX_SOURCES)
     logger.info("draft: %d sources since %s → %d clusters", len(rows), since.isoformat(), len(clusters))
 
+    # The engine returns sources newest-first and clamps at SOURCES_QUERY_LIMIT
+    # (graph_read.py: `ORDER BY s.ingested_at DESC LIMIT $limit`). A full page means
+    # the window held more than the limit: the undrafted remainder is *older* than the
+    # oldest source we got back, i.e. strictly older than `since` is about to become.
+    # There is no engine-side `until` or ascending order to page through it, so that
+    # remainder is simply lost — permanently skipped, never retried. Advancing to
+    # run_start (rather than to the oldest source seen) avoids the worse alternative:
+    # re-clustering and re-writing the same sources — and paying for the LLM calls
+    # again — every truncated run. Make the loss loud instead.
+    truncated = len(rows) == config.SOURCES_QUERY_LIMIT
+    if truncated:
+        oldest_returned = _oldest_ingested_at(rows)
+        logger.error(
+            "draft: TRUNCATED — %d sources returned (SOURCES_QUERY_LIMIT=%d); the window %s to %s could not "
+            "be covered and is now permanently skipped. Raise SOURCES_QUERY_LIMIT or tighten the draft "
+            "schedule.",
+            len(rows),
+            config.SOURCES_QUERY_LIMIT,
+            since.isoformat(),
+            oldest_returned.isoformat() if oldest_returned else "unknown",
+        )
+
     futures = [(cluster, write_story_task.submit(beat, cluster)) for cluster in clusters]
     stories: list[tuple[Story, Cluster]] = []
     for cluster, future in futures:
@@ -112,14 +132,9 @@ def draft_issue() -> dict[str, Any]:
     path = output_dir / f"{run_start.strftime('%Y-%m-%d-%H%M')}.md"
     path.write_text(markdown, encoding="utf-8")
 
-    # The engine clamps `rows` at SOURCES_QUERY_LIMIT, newest first. If it truncated
-    # the window, advancing to run_start would skip everything past the limit — advance
-    # only to the oldest source actually seen instead, so the rest is retried next run.
-    watermark = run_start
-    if len(rows) == config.SOURCES_QUERY_LIMIT:
-        watermark = _oldest_ingested_at(rows)
-
-    # Only now is the window genuinely covered.
+    # Only now is the window genuinely covered (modulo the truncation loss logged
+    # above, which is unrecoverable without engine-side support — see draft.py's
+    # module docstring and README.md).
     with get_postgres_session() as session:
         session.add(
             Issue(
@@ -129,11 +144,17 @@ def draft_issue() -> dict[str, Any]:
                 story_count=len(stories),
             )
         )
-        set_watermark(session, watermark)
+        set_watermark(session, run_start)
         session.commit()
 
     logger.info("draft: wrote %d stories to %s", len(stories), path)
-    return {"path": str(path), "clusters": len(clusters), "stories": len(stories), "since": since.isoformat()}
+    return {
+        "path": str(path),
+        "clusters": len(clusters),
+        "stories": len(stories),
+        "since": since.isoformat(),
+        "truncated": truncated,
+    }
 
 
 if __name__ == "__main__":

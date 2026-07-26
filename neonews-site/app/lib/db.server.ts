@@ -18,6 +18,13 @@ const url = process.env.NEONEWS_POSTGRES_URL;
 if (!url) throw new Error("NEONEWS_POSTGRES_URL is not set");
 const pool = new Pool({ connectionString: url });
 
+// An idle pooled client can emit 'error' (Postgres restart, idle timeout). With
+// no listener, Node treats it as unhandled and crashes the SSR process. Log and
+// let the pool recycle the connection on the next query.
+pool.on("error", (err) => {
+  console.error("pg pool error", err);
+});
+
 type Row = {
   generated_at: Date;
   covers_since: Date;

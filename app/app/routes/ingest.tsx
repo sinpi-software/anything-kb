@@ -22,6 +22,7 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
   if (!me) throw redirect(`/login?next=/app/${params.kbId}/ingest`);
+  if (!me.knowledge_bases.some((kb) => kb.knowledge_base_id === params.kbId)) throw redirect("/app");
   return { me, kbId: params.kbId };
 }
 

@@ -54,6 +54,12 @@ pulumi config set --secret openrouterApiKey "sk-or-..."                 # or pul
 # pulumi config set --secret tunnelToken "<cloudflare tunnel token>"
 ```
 
+- `prefectLanUrl` (optional) — LAN address of the Prefect UI/API, default
+  `http://192.168.0.202:4200`. Used for both `PREFECT_API_URL` and
+  `PREFECT_UI_API_URL`; the UI is browser-side, so this must be an address your
+  browser can reach, not the in-cluster service name. Prefect has no auth — keep
+  this on the LAN, never behind the tunnel.
+
 ## 3. Deploy
 
 ```bash

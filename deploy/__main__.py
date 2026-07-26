@@ -174,6 +174,120 @@ migrate = k8s.batch.v1.Job(
 )
 
 
+# --- prefect ---------------------------------------------------------------
+# Prefect gets its own database inside the existing postgres pod (home lab: one
+# server, several databases). Idempotent: `pulumi up` re-runs this Job, so the
+# CREATE is guarded by a catalog check rather than relying on IF NOT EXISTS,
+# which CREATE DATABASE does not support.
+prefect_db_init = k8s.batch.v1.Job(
+    "prefect-db-init",
+    metadata=meta("prefect-db-init"),
+    spec={
+        "backoffLimit": 5,
+        "template": {
+            "spec": {
+                "restartPolicy": "Never",
+                "containers": [
+                    {
+                        "name": "createdb",
+                        "image": "postgres:16",
+                        "command": ["sh", "-c"],
+                        "args": [
+                            'psql -h postgres -U ingestion -tc "SELECT 1 FROM pg_database WHERE datname=\'prefect\'" '
+                            '| grep -q 1 || createdb -h postgres -U ingestion prefect'
+                        ],
+                        "env": [
+                            {
+                                "name": "PGPASSWORD",
+                                "valueFrom": {"secretKeyRef": {"name": "db-secret", "key": "POSTGRES_PASSWORD"}},
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[postgres_deploy, db_secret]),
+)
+
+# The LAN address the browser-side UI must call. Prefect's UI runs in the browser,
+# so a cluster-internal name (http://prefect:4200/api) would resolve inside the
+# cluster and fail from a laptop.
+prefect_lan_url = cfg.get("prefectLanUrl") or "http://192.168.0.202:4200"
+
+prefect_secret = k8s.core.v1.Secret(
+    "prefect-secret",
+    metadata=meta("prefect-secret"),
+    string_data={
+        # Prefect 3 requires the asyncpg driver; plain postgresql:// fails at startup.
+        "PREFECT_API_DATABASE_CONNECTION_URL": pulumi.Output.concat(
+            "postgresql+asyncpg://ingestion:", pg_password, "@postgres:5432/prefect"
+        ),
+    },
+    opts=ns_opts,
+)
+
+prefect_deploy = k8s.apps.v1.Deployment(
+    "prefect",
+    metadata=meta("prefect"),
+    spec={
+        "replicas": 1,
+        # Singleton over one database — never two servers at once.
+        "strategy": {"type": "Recreate"},
+        "selector": {"matchLabels": {"app": "prefect"}},
+        "template": {
+            "metadata": {"labels": {"app": "prefect"}},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "prefect",
+                        "image": "prefecthq/prefect:3-python3.12",
+                        "command": ["prefect", "server", "start", "--host", "0.0.0.0"],
+                        "ports": [{"containerPort": 4200}],
+                        "env": [
+                            {"name": "PREFECT_SERVER_API_HOST", "value": "0.0.0.0"},
+                            {"name": "PREFECT_API_URL", "value": pulumi.Output.concat(prefect_lan_url, "/api")},
+                            {"name": "PREFECT_UI_API_URL", "value": pulumi.Output.concat(prefect_lan_url, "/api")},
+                            {
+                                "name": "PREFECT_API_DATABASE_CONNECTION_URL",
+                                "valueFrom": {
+                                    "secretKeyRef": {
+                                        "name": "prefect-secret",
+                                        "key": "PREFECT_API_DATABASE_CONNECTION_URL",
+                                    }
+                                },
+                            },
+                        ],
+                        "resources": {"requests": {"cpu": "100m", "memory": "512Mi"}, "limits": {"memory": "2Gi"}},
+                        "readinessProbe": {
+                            "httpGet": {"path": "/api/health", "port": 4200},
+                            "initialDelaySeconds": 15,
+                            "periodSeconds": 10,
+                        },
+                    }
+                ],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(depends_on=[prefect_db_init, prefect_secret]),
+)
+
+# LoadBalancer so k3s ServiceLB binds :4200 on the node — LAN only. Prefect has no
+# auth of its own, so it must NOT be exposed via the tunnel or a Traefik ingress.
+prefect_svc = k8s.core.v1.Service(
+    "prefect",
+    metadata=meta("prefect"),
+    spec={
+        "type": "LoadBalancer",
+        "selector": {"app": "prefect"},
+        "ports": [{"port": 4200, "targetPort": 4200}],
+    },
+    opts=pulumi.ResourceOptions(depends_on=[prefect_deploy]),
+)
+
+pulumi.export("prefect_ui", prefect_lan_url)
+
+
 # --- api + worker ---------------------------------------------------------
 def engine(name: str, cmd: list, container_extra: dict | None = None):
     container = {

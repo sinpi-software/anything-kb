@@ -870,6 +870,69 @@ def test_merge_content_new_entity_stores_description_as_article_without_synthesi
 
 
 @requires_neo4j_and_postgres
+def test_merge_content_dedupes_an_entity_repeated_within_one_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One article naming the same entity twice must produce one node, not two.
+
+    `resolve_entities_batch` compares each extracted entity only against what Neo4j
+    already holds, so on a first ingest neither occurrence sees the other, both come
+    back None, and each mints its own UUID. A real Hacker News catalogue article hit
+    this six times over for a single product, and every surplus copy was an isolated
+    node carrying only its own mention's relationships.
+
+    The second occurrence takes the merge path, so its description folds into the
+    first's article rather than being discarded.
+    """
+    bootstrap_schema()
+    extraction = KnowledgeExtraction(
+        entities=[
+            ExtractedEntity(name="Atmos Embassy", type="Product", description="A torsion-pendulum clock."),
+            # Same entity, named again with different spacing and casing — normalize_name
+            # must see through both.
+            ExtractedEntity(name="atmos  embassy", type="Product", description="Runs on temperature change."),
+        ],
+        relationships=[],
+    )
+    monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
+    monkeypatch.setattr(
+        knowledge_mod,
+        "synthesize_article",
+        lambda *a, **k: knowledge_mod.ArticleResult(article="both mentions", abstract="both mentions"),
+    )
+
+    class _NullClient:
+        def __enter__(self) -> "_NullClient":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(knowledge_mod, "OpenRouter", lambda *a, **k: _NullClient())
+
+    knowledge_base_id = f"merge-{uuid.uuid4()}"
+    try:
+        result = merge_content(
+            knowledge_base_id,
+            "irrelevant — extraction is stubbed",
+            [{"name": "Product", "description": ""}],
+            [],
+            str(uuid.uuid4()),
+        )
+        assert result.entities_created == 1, "the repeat must not create a second node"
+        with get_neo4j_session() as neo:
+            count = neo.run(
+                "MATCH (e:Entity {knowledge_base_id: $o}) RETURN count(e) AS c",
+                {"o": knowledge_base_id},
+            ).single(True)["c"]
+        assert count == 1
+    finally:
+        with get_neo4j_session() as neo:
+            neo.run("MATCH (n) WHERE n.knowledge_base_id = $o DETACH DELETE n", {"o": knowledge_base_id})
+
+
+@requires_neo4j_and_postgres
 def test_merge_content_existing_entity_synthesizes_article_and_stores_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -622,7 +622,16 @@ def merge_content(
         resolved_ids = resolve_entities_batch(
             neo, client, config.RESOLUTION_MODEL, knowledge_base_id, entities, llm_params
         )
+        # `resolve_entities_batch` compares each entity only against what Neo4j already holds,
+        # so two occurrences of one name in the same extraction never see each other: both come
+        # back None and each would mint its own node. Remember what this batch has already
+        # assigned, so a repeat merges into that node instead. Keyed by type as well as name —
+        # "Apple" the Organization and "Apple" the Product are not the same subject.
+        assigned_in_batch: dict[tuple[str, str], str] = {}
         for entity, existing_id in zip(entities, resolved_ids, strict=True):
+            batch_key = (normalize_name(entity.name), entity.type)
+            if existing_id is None:
+                existing_id = assigned_in_batch.get(batch_key)
             if existing_id is None:
                 entity_id = str(uuid.uuid4())
                 article, summary = entity.description, _derive_abstract(entity.description)
@@ -647,6 +656,7 @@ def merge_content(
                 published_at=source_published_at,
                 ingested_at=source_ingested_at,
             )
+            assigned_in_batch[batch_key] = entity_id
             name_to_id[normalize_name(entity.name)] = entity_id
 
         rel_examples: dict[str, str] = {}

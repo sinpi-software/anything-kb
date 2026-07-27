@@ -62,10 +62,10 @@ def _citation_urls(message: dict[str, Any]) -> tuple[frozenset[str], bool]:
     if not isinstance(annotations, list) or not annotations:
         return frozenset(), False
     urls = {
-        str(url)
+        url
         for annotation in annotations
         if isinstance(annotation, dict) and annotation.get("type") == "url_citation"
-        if (url := (annotation.get("url_citation") or {}).get("url"))
+        if isinstance(uc := annotation.get("url_citation"), dict) and isinstance(url := uc.get("url"), str) and url
     }
     return frozenset(urls), True
 
@@ -94,8 +94,14 @@ def complete(
     if web:
         body["plugins"] = [{"id": "web", "max_results": config.WEB_MAX_RESULTS}]
 
+    api_key = os.environ.get(config.OPENROUTER_API_KEY_ENV, "").strip()
+    if not api_key:
+        # An empty value, not just an absent one: .env.sample sets this key to the empty
+        # string as a placeholder, so os.environ[...] would sail past a KeyError and the
+        # call would fail as an opaque 401 instead.
+        raise LLMError(f"{config.OPENROUTER_API_KEY_ENV} is unset or empty")
     headers = {
-        "Authorization": f"Bearer {os.environ[config.OPENROUTER_API_KEY_ENV]}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     with concurrency(config.LLM_CONCURRENCY_LIMIT, strict=False):
@@ -110,6 +116,6 @@ def complete(
     message = choices[0].get("message") or {}
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise LLMError("model returned no content")
+        raise LLMError(f"{model} returned no content")
     citation_urls, had_annotations = _citation_urls(message)
     return LLMResult(content=content, citation_urls=citation_urls, had_annotations=had_annotations)

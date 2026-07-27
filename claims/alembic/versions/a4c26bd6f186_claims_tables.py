@@ -1,8 +1,8 @@
 """claims tables
 
-Revision ID: 54d340d27642
+Revision ID: a4c26bd6f186
 Revises: 
-Create Date: 2026-07-27 00:17:08.499530
+Create Date: 2026-07-27 00:25:07.211519
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '54d340d27642'
+revision: str = 'a4c26bd6f186'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,6 +40,7 @@ def upgrade() -> None:
     )
     op.create_table('claims_claims',
     sa.Column('document_id', sa.UUID(), nullable=False),
+    sa.Column('text', sa.TEXT(), nullable=False),
     sa.Column('quote', sa.TEXT(), nullable=True),
     sa.Column('attributed_to', sa.TEXT(), nullable=True),
     sa.Column('attribution_type', sa.TEXT(), nullable=True),
@@ -54,7 +55,6 @@ def upgrade() -> None:
     sa.Column('verified_at', postgresql.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('attempts', sa.INTEGER(), server_default=sa.text('0'), nullable=False),
     sa.Column('error', sa.TEXT(), nullable=True),
-    sa.Column('text', sa.TEXT(), nullable=False),
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['document_id'], ['claims_documents.id'], ),

@@ -1,6 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, UniqueConstraint, func, text
+from sqlalchemy import ForeignKey, UniqueConstraint, func
+
+# aliased: Claim declares a column named `text`, which would shadow this for the rest
+# of that class body.
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import BOOLEAN, INTEGER, REAL, TEXT, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql.expression import false
@@ -15,7 +19,7 @@ class Base(DeclarativeBase):
 
 class _BaseModel(Base):
     __abstract__ = True
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=sql_text("gen_random_uuid()"))
     created_at: Mapped[datetime] = mapped_column(_TS, nullable=False, server_default=func.now())
 
 
@@ -37,7 +41,7 @@ class Document(_BaseModel):
     fetched_at: Mapped[datetime | None] = mapped_column(_TS, nullable=True)
     extracted_at: Mapped[datetime | None] = mapped_column(_TS, nullable=True)
     reported_at: Mapped[datetime | None] = mapped_column(_TS, nullable=True)
-    attempts: Mapped[int] = mapped_column(INTEGER, nullable=False, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(INTEGER, nullable=False, server_default=sql_text("0"))
     error: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
 
@@ -47,6 +51,7 @@ class Claim(_BaseModel):
     __tablename__ = "claims_claims"
 
     document_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("claims_documents.id"), nullable=False)
+    text: Mapped[str] = mapped_column(TEXT, nullable=False)  # normalized to stand alone
     quote: Mapped[str | None] = mapped_column(TEXT, nullable=True)  # verbatim span
     # Who asserted it, in-document.
     attributed_to: Mapped[str | None] = mapped_column(TEXT, nullable=True)
@@ -64,12 +69,8 @@ class Claim(_BaseModel):
     confidence: Mapped[float | None] = mapped_column(REAL, nullable=True)
     rationale: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(_TS, nullable=True)
-    attempts: Mapped[int] = mapped_column(INTEGER, nullable=False, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(INTEGER, nullable=False, server_default=sql_text("0"))
     error: Mapped[str | None] = mapped_column(TEXT, nullable=True)
-    # Declared after `attempts` deliberately: naming this field `text` earlier in the
-    # class body would shadow the `sqlalchemy.text` import for the rest of the class,
-    # breaking `attempts`'s `server_default=text("0")` call above.
-    text: Mapped[str] = mapped_column(TEXT, nullable=False)  # normalized to stand alone
 
 
 class Evidence(_BaseModel):

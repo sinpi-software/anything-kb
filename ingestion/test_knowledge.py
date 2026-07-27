@@ -624,6 +624,23 @@ def test_fulltext_candidate_query_matches_name_variants_and_is_knowledge_base_sc
         _cleanup(knowledge_base_b)
 
 
+def _echo_synthesis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub article synthesis to echo the description straight back.
+
+    merge_content now synthesizes a NEW entity's article as well as a merged one, so tests that
+    exercise something else entirely — type constraints, provenance, casing — would otherwise need
+    a real LLM client where they previously needed none. Echoing keeps their existing assertions
+    about article content true and unchanged.
+    """
+    monkeypatch.setattr(
+        knowledge_mod,
+        "synthesize_article",
+        lambda client, model, existing, new_info, params: knowledge_mod.ArticleResult(
+            article=new_info, abstract=knowledge_mod._derive_abstract(new_info)
+        ),
+    )
+
+
 @requires_neo4j_and_postgres
 def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
     bootstrap_schema()
@@ -640,6 +657,7 @@ def test_merge_content_constrains_types_and_records_job_provenance(monkeypatch: 
         ],
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    _echo_synthesis(monkeypatch)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
 
     class _NullClient:
@@ -701,6 +719,7 @@ def test_merge_content_consolidates_novel_relationship_type_and_records_new_type
         ],
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    _echo_synthesis(monkeypatch)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
     monkeypatch.setattr(
         knowledge_mod,
@@ -764,6 +783,7 @@ def test_merge_content_normalizes_type_casing_and_stores_configured_name(monkeyp
         ],
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    _echo_synthesis(monkeypatch)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
 
     class _NullClient:
@@ -817,6 +837,7 @@ def test_merge_content_new_type_colliding_with_existing_canon_uses_canonical_cas
         relationships=[],
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    _echo_synthesis(monkeypatch)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
     monkeypatch.setattr(
         knowledge_mod,
@@ -864,11 +885,20 @@ def test_merge_content_new_type_colliding_with_existing_canon_uses_canonical_cas
 
 
 @requires_neo4j_and_postgres
-def test_merge_content_new_entity_stores_description_as_article_without_synthesis(
+def test_merge_content_synthesizes_a_new_entitys_article_from_its_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A brand-new entity has nothing to merge into, so its description becomes the article verbatim
-    and the abstract is derived cheaply — synthesize_article must not be called at all."""
+    """A new entity's article is synthesized too, not stored as the raw description.
+
+    This deliberately inverts the earlier contract, which asserted synthesize_article must NOT be
+    called for a new entity — the description was stored verbatim to save one LLM call. The cost of
+    that saving turned out to be the whole knowledge base: article richness tracked merge count
+    exactly, and since 178 of 193 entities in a real ingest were named by exactly one document,
+    92% of the graph was a ~169-character stub that nothing would ever enrich.
+
+    Passing "" as the existing article routes a first sighting through the same living-document
+    prompt a merge uses, so a new entity gets a structured article rather than a fragment.
+    """
     bootstrap_schema()
     description = "Ada was a mathematician. She wrote the first algorithm."
     extraction = KnowledgeExtraction(
@@ -878,10 +908,16 @@ def test_merge_content_new_entity_stores_description_as_article_without_synthesi
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
 
-    def _fail_if_called(*a: Any, **k: Any) -> Any:
-        raise AssertionError("synthesize_article must not be called for a new entity")
+    seen: dict[str, Any] = {}
 
-    monkeypatch.setattr(knowledge_mod, "synthesize_article", _fail_if_called)
+    def _capture(client: Any, model: str, existing_article: str, new_info: str, params: Any) -> Any:
+        seen["existing_article"] = existing_article
+        seen["new_info"] = new_info
+        return knowledge_mod.ArticleResult(
+            article="## Life\nAda Lovelace was a mathematician…", abstract="A mathematician."
+        )
+
+    monkeypatch.setattr(knowledge_mod, "synthesize_article", _capture)
 
     class _NullClient:
         def __enter__(self) -> "_NullClient":
@@ -905,13 +941,16 @@ def test_merge_content_new_entity_stores_description_as_article_without_synthesi
             source_published_at="2026-07-22",
         )
         assert result.entities_created == 1
+        # Synthesis ran, and it ran with no existing article — a first sighting, not a merge.
+        assert seen["existing_article"] == ""
+        assert seen["new_info"] == description
         with get_neo4j_session() as neo:
             row = neo.run(
                 "MATCH (e:Entity {knowledge_base_id: $o}) RETURN e.article AS a, e.summary AS s",
                 {"o": knowledge_base_id},
             ).single(True)
-            assert row["a"] == description
-            assert row["s"] == knowledge_mod._derive_abstract(description)
+            assert row["a"] == "## Life\nAda Lovelace was a mathematician…"
+            assert row["s"] == "A mathematician."
             source = neo.run(
                 "MATCH (s:Source {knowledge_base_id: $o, job_id: $j}) "
                 "RETURN s.label AS l, toString(s.published_at) AS d",
@@ -1066,6 +1105,7 @@ def test_merge_content_passes_examples_and_gate_model_and_drops_fragment(
         relationships=[],
     )
     monkeypatch.setattr(knowledge_mod, "extract_knowledge", lambda *a, **k: extraction)
+    _echo_synthesis(monkeypatch)
     monkeypatch.setattr(knowledge_mod, "resolve_entities_batch", lambda *a, **k: [None] * len(a[4]))
 
     captured: dict[str, Any] = {}

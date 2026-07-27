@@ -668,7 +668,14 @@ def merge_content(
                 existing_id = assigned_in_batch.get(batch_key)
             if existing_id is None:
                 entity_id = str(uuid.uuid4())
-                article, summary = entity.description, _derive_abstract(entity.description)
+                # A first sighting is synthesized too, with no existing article to merge into.
+                # Storing the raw description here saved one LLM call and cost the knowledge base
+                # its substance: article richness tracked merge count exactly, and because most
+                # entities are named by a single document, the great majority of the graph stayed a
+                # short stub that nothing would ever enrich. Routing a first sighting through the
+                # same living-document prompt gives it a structured article from the outset.
+                result = synthesize_article(client, config.LLM_MODEL, "", entity.description, llm_params)
+                article, summary = result.article, result.abstract
                 created += 1
             else:
                 entity_id = existing_id

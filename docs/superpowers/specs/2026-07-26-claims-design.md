@@ -47,6 +47,14 @@ output and `verify` additionally needs the web plugin — one seam rather than
 neonews' `_strict_schema` copied twice. It is also the single patch point that keeps
 the test suite from spending money.
 
+**`llm.py` calls OpenRouter over httpx, not the `openrouter` SDK** — unlike
+`neonews/write.py` and `ingestion/knowledge.py`. The SDK's `ChatAssistantMessage`
+component has no `annotations` field, and its `BaseModel` does not set
+`extra="allow"`, so pydantic discards the web plugin's citations during
+unmarshalling. The grounding guard below depends on those citations, so the raw JSON
+of `POST /api/v1/chat/completions` is the only workable source. httpx is already a
+dependency and `neonews/engine.py` already talks to an API this way.
+
 There is no `claims.toml`. neonews has one because an operator declares sources and
 an editorial voice; here there is no source list, and prompts only developers tune
 belong in code.
@@ -183,11 +191,11 @@ click.
 
 **Grounding guard.** The research calls use `json_schema` output *and* the web
 plugin, so the model emits URL strings into a JSON field — strings it can invent.
-OpenRouter returns genuine citations separately as message `annotations`. `verify.py`
-filters emitted evidence against the annotation URL set: where annotations are
-present, evidence citing a URL absent from them is dropped and logged; where a
-response carries no annotations at all there is nothing to check against, so evidence
-is kept and a warning is logged.
+OpenRouter returns genuine citations separately, as `annotations` entries of type
+`url_citation` on the assistant message. `verify.py` filters emitted evidence against
+that URL set: where annotations are present, evidence citing a URL absent from them
+is dropped and logged; where a response carries no annotations at all there is
+nothing to check against, so evidence is kept and a warning is logged.
 
 **Dedup** compares `(canonicalize_url(url), stance)` while storing the URL as given.
 The same URL arriving from both calls with opposite stances is kept as two rows — a

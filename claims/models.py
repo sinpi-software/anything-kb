@@ -74,8 +74,10 @@ class Claim(_BaseModel):
 
 
 class Evidence(_BaseModel):
-    """One cited source bearing on one claim. Written only for URLs that appeared in
-    OpenRouter's own annotations — see verify.ground_evidence."""
+    """One cited source bearing on one claim. Written only for URLs OpenRouter reported
+    actually visiting — except when a response carried no annotations at all, in which
+    case its evidence is kept unverified and a warning is logged. See
+    verify.ground_evidence."""
 
     __tablename__ = "claims_evidence"
 

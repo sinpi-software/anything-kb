@@ -164,6 +164,18 @@ def dedupe_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
     return kept
 
 
+def _normalize_stance(item: EvidenceItem) -> EvidenceItem:
+    """Coerce an out-of-vocabulary stance to "context", once, at parse time.
+
+    Done here rather than at write time so every downstream consumer — the judge's
+    rendered evidence, the dedup key, and the stored row — agrees on the same value.
+    A miscategorized source is still a real source, not a rejected one.
+    """
+    if item.stance not in config.STANCES:
+        item.stance = "context"
+    return item
+
+
 def research(
     claim_text: str, attribution: str, context: str, adversarial: bool
 ) -> tuple[list[EvidenceItem], frozenset[str], bool]:
@@ -182,7 +194,8 @@ def research(
         web=True,
     )
     parsed = Research.model_validate(json.loads(result.content))
-    return parsed.evidence, result.citation_urls, result.had_annotations
+    evidence = [_normalize_stance(item) for item in parsed.evidence]
+    return evidence, result.citation_urls, result.had_annotations
 
 
 def judge(claim_text: str, attribution: str, evidence: list[EvidenceItem]) -> Judgment:
@@ -279,8 +292,33 @@ def verify_claims() -> dict[str, int]:
             if claim is None:  # deleted mid-run
                 continue
             try:
+                # The success-path writes live inside this same try: if the commit
+                # itself fails (a constraint violation, a dropped connection), that
+                # must dead-letter this claim too, not escape and sink the sweep.
                 outcome = future.result()
+                for item in outcome.evidence:
+                    session.add(
+                        Evidence(
+                            claim_id=claim.id,
+                            url=item.url,
+                            title=item.title,
+                            snippet=item.snippet,
+                            stance=item.stance,
+                            published_at=_parse_published(item.published_at),
+                        )
+                    )
+                claim.verdict = outcome.judgment.verdict
+                claim.confidence = outcome.judgment.confidence
+                claim.rationale = outcome.judgment.rationale
+                claim.verified_at = datetime.now(UTC)
+                claim.error = None
+                # Evidence and verdict commit together.
+                session.commit()
+                verified += 1
             except Exception as exc:  # one bad claim must never sink the sweep
+                # Discard whatever this claim half-wrote before recording the failure,
+                # so a bad commit cannot poison the session for the claims after it.
+                session.rollback()
                 claim.attempts += 1
                 claim.error = str(exc)[: config.ERROR_MAX_CHARS]
                 # At the cap the claim is dead-lettered with verdict still NULL —
@@ -289,27 +327,6 @@ def verify_claims() -> dict[str, int]:
                 session.commit()
                 failed += 1
                 logger.warning("verify: claim %s failed (attempt %d): %s", claim_id, claim.attempts, exc)
-                continue
-
-            for item in outcome.evidence:
-                session.add(
-                    Evidence(
-                        claim_id=claim.id,
-                        url=item.url,
-                        title=item.title,
-                        snippet=item.snippet,
-                        stance=item.stance if item.stance in config.STANCES else "context",
-                        published_at=_parse_published(item.published_at),
-                    )
-                )
-            claim.verdict = outcome.judgment.verdict
-            claim.confidence = outcome.judgment.confidence
-            claim.rationale = outcome.judgment.rationale
-            claim.verified_at = datetime.now(UTC)
-            claim.error = None
-            # Evidence and verdict commit together.
-            session.commit()
-            verified += 1
 
     logger.info("verify-claims: %d verified, %d failures", verified, failed)
     return {"verified": verified, "failed": failed}

@@ -102,14 +102,54 @@ def claim() -> Any:
         session.commit()
 
 
-def _patch_calls(monkeypatch: Any, evidence: list[dict[str, Any]], judgment: dict[str, Any]) -> None:
-    """Patch the one seam. Research calls return `evidence`; the judge returns `judgment`."""
+def _patch_calls(
+    monkeypatch: Any,
+    evidence: list[dict[str, Any]],
+    judgment: dict[str, Any],
+    *,
+    refutation_evidence: list[dict[str, Any]] | None = None,
+    citation_urls: frozenset[str] | None = None,
+    refutation_citation_urls: frozenset[str] | None = None,
+    calls: list[dict[str, Any]] | None = None,
+) -> None:
+    """Patch the one seam, keyed off `system` (and, via `calls`, `web`) so the three
+    calls this flow makes — supporting research, refutation research, and the webless
+    judge — are each distinguishable and can be given independent payloads.
+
+    Branching on `schema_name` alone (as an earlier version of this fixture did) makes
+    both research calls indistinguishable: they get the same evidence and the same
+    `citation_urls`, so a test built on it cannot tell the difference between grounding
+    applied per-call and grounding applied to the pooled list, between the refutation
+    call genuinely using its own brief and it silently becoming a second confirming
+    call, or between the judge staying webless and it silently gaining web access.
+    Passing `refutation_evidence` / `refutation_citation_urls` gives the refutation call
+    its own payload; `calls`, if given, records every invocation's `system` and `web` so
+    a test can assert on what was actually sent.
+    """
+    supporting_evidence = evidence
+    against_evidence = evidence if refutation_evidence is None else refutation_evidence
+    supporting_citations = (
+        citation_urls if citation_urls is not None else frozenset(item["url"] for item in supporting_evidence)
+    )
+    against_citations = (
+        refutation_citation_urls
+        if refutation_citation_urls is not None
+        else frozenset(item["url"] for item in against_evidence)
+    )
 
     def _complete(**kwargs: Any) -> llm.LLMResult:
+        if calls is not None:
+            calls.append({"system": kwargs["system"], "web": kwargs.get("web", False)})
         if kwargs["schema_name"] == "research":
+            if kwargs["system"] == verify._REFUTATION_SYSTEM:
+                return llm.LLMResult(
+                    content=json.dumps({"evidence": against_evidence}),
+                    citation_urls=against_citations,
+                    had_annotations=True,
+                )
             return llm.LLMResult(
-                content=json.dumps({"evidence": evidence}),
-                citation_urls=frozenset(item["url"] for item in evidence),
+                content=json.dumps({"evidence": supporting_evidence}),
+                citation_urls=supporting_citations,
                 had_annotations=True,
             )
         return llm.LLMResult(content=json.dumps(judgment), citation_urls=frozenset(), had_annotations=False)
@@ -200,6 +240,74 @@ def test_verify_writes_no_evidence_when_every_url_is_ungrounded(monkeypatch: Any
         row = session.get(Claim, claim_id)
         assert row is not None
         assert row.verdict == "unverifiable"
+
+
+def test_verify_grounds_each_research_call_against_its_own_citations(monkeypatch: Any, claim: Any) -> None:
+    """The laundering scenario per-call grounding exists to prevent.
+
+    The supporting call genuinely cites `real_x` and returns evidence for it. The
+    refutation call genuinely cites only `real_z`, but its evidence list also carries a
+    fabricated snippet attached to `real_x` (a real URL, but one *this* call never
+    visited) plus a wholly invented `invented_y`. If grounding pooled the two calls'
+    citations before filtering, `real_x` would be in the pooled citation set and the
+    fabricated item would be laundered through — the refutation call's fabrication
+    riding on the supporting call's legitimate visit to the same URL. Grounding each
+    call against only its own citations must drop both.
+    """
+    claim_id = claim()
+    real_x = "https://real.test/x"
+    real_z = "https://real.test/z"
+    invented_y = "https://invented.test/y"
+    _patch_calls(
+        monkeypatch,
+        [{"url": real_x, "title": "A", "snippet": "genuine supporting evidence", "stance": "supports"}],
+        {"verdict": "supported", "confidence": 0.8, "rationale": "The primary source confirms it."},
+        citation_urls=frozenset({real_x}),
+        refutation_evidence=[
+            {"url": real_x, "title": "Fake", "snippet": "a fabricated snippet on a URL this call never cited",
+             "stance": "contradicts"},
+            {"url": invented_y, "title": "Invented", "snippet": "a wholly invented source", "stance": "contradicts"},
+        ],
+        refutation_citation_urls=frozenset({real_z}),
+    )
+    verify_claims()
+    with get_postgres_session() as session:
+        evidence = session.scalars(select(Evidence).where(Evidence.claim_id == claim_id)).all()
+        assert [(e.url, e.stance) for e in evidence] == [(real_x, "supports")]
+
+
+def test_verify_sends_an_opposed_pair_of_research_calls(monkeypatch: Any, claim: Any) -> None:
+    """The two research calls must be given different briefs — one research, one
+    refutation — never the same confirming call run twice."""
+    claim()
+    calls: list[dict[str, Any]] = []
+    _patch_calls(
+        monkeypatch,
+        [{"url": "https://real.test/a", "snippet": "x", "stance": "supports"}],
+        {"verdict": "supported", "confidence": 0.8, "rationale": "Checks out."},
+        calls=calls,
+    )
+    verify_claims()
+    research_systems = [c["system"] for c in calls if c["web"] is True]
+    assert len(research_systems) == 2
+    assert set(research_systems) == {verify._RESEARCH_SYSTEM, verify._REFUTATION_SYSTEM}
+
+
+def test_verify_keeps_the_judge_off_the_web(monkeypatch: Any, claim: Any) -> None:
+    """The judge must reason only over the evidence rows already written — never search
+    the web itself, or a rationale could rest on a source that never became a row."""
+    claim()
+    calls: list[dict[str, Any]] = []
+    _patch_calls(
+        monkeypatch,
+        [{"url": "https://real.test/a", "snippet": "x", "stance": "supports"}],
+        {"verdict": "supported", "confidence": 0.8, "rationale": "Checks out."},
+        calls=calls,
+    )
+    verify_claims()
+    judge_calls = [c for c in calls if c["system"] == verify._JUDGE_SYSTEM]
+    assert len(judge_calls) == 1
+    assert judge_calls[0]["web"] is False
 
 
 def test_judge_rejects_an_unknown_verdict(monkeypatch: Any) -> None:

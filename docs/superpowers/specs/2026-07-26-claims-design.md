@@ -197,6 +197,16 @@ that URL set: where annotations are present, evidence citing a URL absent from t
 is dropped and logged; where a response carries no annotations at all there is
 nothing to check against, so evidence is kept and a warning is logged.
 
+This makes `RESEARCH_MODEL` a constrained choice, not just "any web-capable model":
+it must return `url_citation` annotations when called with `json_schema` output *and*
+the web plugin together, or the filter above has nothing to check against on every
+call and the guard is silently inert. This is a real, non-obvious model constraint —
+`openai/gpt-5-mini` returns annotations with the web plugin alone but none once
+`response_format: json_schema` is also set — and it surfaced only from an end-to-end
+run against a live article, because every unit test stubs the LLM and so cannot
+observe a real model's behavior under this combination. See `config.py` and
+`README.md`'s Notes section.
+
 **Dedup** compares `(canonicalize_url(url), stance)` while storing the URL as given.
 The same URL arriving from both calls with opposite stances is kept as two rows — a
 source that genuinely cuts both ways is signal the judge should see.

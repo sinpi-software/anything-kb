@@ -109,6 +109,40 @@ every test, unconditionally. Individual tests patch `llm.complete` (or
 its `BaseModel` does not allow extras, so pydantic discards the web plugin's
 citations — and the grounding filter needs exactly those.
 
+**`RESEARCH_MODEL` must return citations under structured output.** The grounding
+filter (`verify.ground_evidence`) trusts OpenRouter's `url_citation` annotations as
+its allowlist for model-emitted evidence URLs. Some models only emit those
+annotations when the web plugin is the *only* thing shaping the response — add
+`response_format: json_schema` (which `llm.complete` always sends) and they go
+silent, with no error, no matter how many web results were used. `openai/gpt-5-mini`
+does exactly this: annotations with the web plugin alone, none with json_schema also
+set. Since `verify.py` needs both at once, that combination made the filter inert —
+every emitted URL was kept, unchecked. This was only caught by an end-to-end run
+against a real article; every unit test stubs the LLM, so no test can see it.
+
+Before changing `RESEARCH_MODEL`, confirm the candidate returns annotations under
+this exact combination (costs one cheap API call):
+
+```bash
+cd claims && uv run python -c "
+import config, llm
+from pydantic import BaseModel
+
+class Answer(BaseModel):
+    answer: str
+
+r = llm.complete(model='the/candidate-model', system='Answer using web search.',
+                  user='What is the capital of France?', schema_name='answer',
+                  schema=Answer, web=True)
+print('had_annotations:', r.had_annotations, 'citation_urls:', r.citation_urls)
+"
+```
+
+`had_annotations: True` with a non-empty `citation_urls` means the filter has
+something to check against. `had_annotations: False` means it does not, silently.
+Verified 2026-07-27: `google/gemini-2.5-flash` (in use), `anthropic/claude-sonnet-4.5`,
+and `perplexity/sonar` all pass; `openai/gpt-5-mini` fails.
+
 `claims_reports` has no unique constraint on `document_id`. Sequential runs of
 `report-documents` are idempotent by construction (`reported_at` gates the sweep), but
 two concurrent runs could both read `reported_at IS NULL` for the same document before

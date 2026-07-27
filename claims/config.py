@@ -29,7 +29,20 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Three models, three jobs: cheap structured extraction, web-enabled research, and the
 # strongest of the three to judge. Mirrors the engine's split of extraction onto its own.
 EXTRACT_MODEL = "openai/gpt-5-mini"
-RESEARCH_MODEL = "openai/gpt-5-mini"
+# RESEARCH_MODEL is constrained beyond "web-capable": it MUST return `url_citation`
+# annotations when called with response_format: json_schema *and* the web plugin
+# together, because verify.ground_evidence uses those annotations as its allowlist —
+# without them the grounding filter has nothing to check emitted URLs against, so it
+# keeps everything unchecked and the security boundary is silently inert. This is not
+# hypothetical: it happened. `openai/gpt-5-mini` returns annotations with the web
+# plugin alone, but returns none once response_format: json_schema is also set, and the
+# design needs both at once — a controlled experiment (same model/prompt/plugin, only
+# response_format varying) isolated this before the same json_schema+web request was
+# re-run against other models. Verified 2026-07-27 to return annotations under those
+# exact conditions: google/gemini-2.5-flash (in use here), anthropic/claude-sonnet-4.5,
+# perplexity/sonar. Do not "optimize" this back to a cheaper OpenAI model without
+# re-running that check — see README.md's Notes section for the one-command probe.
+RESEARCH_MODEL = "google/gemini-2.5-flash"
 JUDGE_MODEL = "openai/gpt-5"
 LLM_TIMEOUT_SECONDS = 120.0
 # Prefect global concurrency limit name, acquired with strict=False so an absent

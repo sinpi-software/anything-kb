@@ -22,7 +22,7 @@ def _require_test_postgres() -> None:
     README.md was never done, and reported as a clean pass that is the worst outcome."""
     try:
         with get_postgres_session() as s:
-            s.execute(text("SELECT 1"))
+            s.execute(text("SELECT 1 FROM claims_documents LIMIT 1"))
     except Exception as exc:
         raise RuntimeError(
             f"claims_test is not reachable at {config.POSTGRES_URL_ENV}="

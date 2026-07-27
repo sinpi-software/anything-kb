@@ -99,7 +99,15 @@ _RELATIONSHIP_COMPLETENESS = (
     "consistently-named node — never fold a hierarchy into a compound name like "
     "'Kelso, Cowlitz County, Washington' — and add it from your own knowledge when the text omits it, "
     "so separate documents connect through the anchors they share. Each relationship's source and "
-    "target MUST be written exactly as the name of an entity in your entities list (same spelling)."
+    "target MUST be written exactly as the name of an entity in your entities list (same spelling).\n\n"
+    # Coverage alone is satisfied most cheaply by labelling every edge with the catch-all, which is
+    # exactly what happened: 216 of 241 edges in a real ingest were "Related to", including
+    # "person -[Related to]-> the department prosecuting them". Ask for precision in the same breath.
+    "Give each relationship the MOST SPECIFIC type the text supports, and say what actually holds "
+    "between the two entities: prefer 'Charged by', 'Detained at', 'Acquired', 'Funds' over a vague "
+    "link. Use 'Related to' only when the text genuinely supports no more specific relation — it is a "
+    "last resort, not a default. Direction matters: the source is the actor and the target is what "
+    "it acts on, so a maker of a product is 'Google -[Created]-> Pixel', never the reverse."
 )
 
 
@@ -121,9 +129,16 @@ def build_extraction_messages(
             f"Relationship types:\n{_render_types(relationship_types)}\n\n"
             "When you find something genuinely new that matches the user's interests and no existing "
             "type fits, coin a concise new type name and use it. Do not force-fit and do not create "
-            "types for incidental mentions. Only coin a type for a category of durable, "
+            "types for incidental mentions. Only coin an ENTITY type for a category of durable, "
             "individually-referenceable things (people, organizations, places, works, events) — never "
-            "for time windows, durations, dates, quantities, measurements, or descriptive attributes.\n\n"
+            "for time windows, durations, dates, quantities, measurements, or descriptive attributes.\n"
+            # That durability rule reads as entity-only guidance, and a relationship can never be a
+            # "durable, individually-referenceable thing" — so the model declined to coin relationship
+            # types at all. Across two full ingests the entity vocabulary grew from 4 types to 9 while
+            # the relationship vocabulary never moved off its original 3. Say it explicitly.
+            "Coin a new RELATIONSHIP type on the same terms: when the relation the text states is "
+            "genuinely distinct from every existing one, name it in sentence case ('Charged by', "
+            "'Detained at', 'Acquired') rather than falling back on a vague existing type.\n\n"
             f"{_ENTITY_QUALITY}\n\n"
             "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
             f"{_RELATIONSHIP_COMPLETENESS}"

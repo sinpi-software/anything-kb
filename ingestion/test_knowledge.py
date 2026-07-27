@@ -135,6 +135,43 @@ def test_build_extraction_messages_pushes_relationship_completeness(discover: bo
     assert "name of an entity in your entities list" in joined
 
 
+@pytest.mark.parametrize("discover", [True, False])
+def test_build_extraction_messages_demands_a_specific_relationship_type(discover: bool) -> None:
+    """The completeness rule pushes hard for coverage — "connect every entity" — and says nothing
+    about how precise the relationship type must be. With a catch-all named "Related to" in the
+    vocabulary, the cheapest way to satisfy coverage is to label every edge with it, which is what
+    the model did: 216 of 241 edges in a real ingest, including "person -[Related to]-> the
+    department prosecuting them". Coverage must be asked for together with specificity."""
+    msgs = build_extraction_messages(
+        [{"name": "Person", "description": ""}],
+        [{"name": "Related to", "description": ""}],
+        "x",
+        interests="i",
+        discover=discover,
+    )
+    joined = " ".join(m["content"] for m in msgs).lower()
+    assert "most specific" in joined
+    assert "related to" in joined  # the catch-all is named as a last resort, not a default
+
+
+def test_build_extraction_messages_open_mode_invites_new_relationship_types() -> None:
+    """Type discovery worked for entities and never once for relationships across two full ingests:
+    the entity vocabulary grew from 4 types to 9 while the relationship vocabulary stayed at its
+    original 3. The permission to coin a type is phrased only in entity terms — "durable,
+    individually-referenceable things (people, organizations, places, works, events)" — which a
+    relationship can never satisfy, so the model correctly declined. `consolidate_types` was
+    therefore never called for relationships and its permissive gate never got a say."""
+    msgs = build_extraction_messages(
+        [{"name": "Person", "description": ""}],
+        [{"name": "Related to", "description": ""}],
+        "x",
+        interests="i",
+        discover=True,
+    )
+    joined = " ".join(m["content"] for m in msgs).lower()
+    assert "new relationship type" in joined
+
+
 def test_normalize_name() -> None:
     assert normalize_name("  Barack   Obama ") == "barack obama"
 

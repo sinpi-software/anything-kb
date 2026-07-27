@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from prefect import flow, get_run_logger
 from prefect.exceptions import MissingContextError
@@ -45,7 +46,11 @@ class ExtractedClaim(BaseModel):
     attribution_type: str | None = None
     cited_source: str | None = None
     cited_source_url: str | None = None
-    claim_type: str
+    # A Literal, not a bare str: `enum` is not in llm._UNSUPPORTED_KEYWORDS, so this
+    # survives strict_schema and OpenAI strict mode enforces the vocabulary at the API
+    # — the same guarantee `verdict`/`stance` get from raising/coercing, but applied
+    # upstream of select_for_verification instead of after the fact.
+    claim_type: Literal["empirical", "predictive", "normative", "opinion"]
     checkworthiness: float = Field(ge=0.0, le=1.0)
 
 
@@ -170,25 +175,42 @@ def extract_claims() -> dict[str, int]:
                 continue
 
             selected = select_for_verification(extraction.claims)
-            for claim, is_selected in zip(extraction.claims, selected, strict=True):
-                session.add(
-                    Claim(
-                        document_id=document.id,
-                        text=claim.text,
-                        quote=claim.quote,
-                        attributed_to=claim.attributed_to,
-                        attribution_type=claim.attribution_type,
-                        cited_source=claim.cited_source,
-                        cited_source_url=claim.cited_source_url,
-                        claim_type=claim.claim_type,
-                        checkworthiness=claim.checkworthiness,
-                        selected_for_verification=is_selected,
+            try:
+                # The claim writes and the stamp commit together, inside this same try:
+                # if the commit itself fails (a constraint violation, a value Postgres
+                # refuses — e.g. a NUL byte in model output, which TEXT does not accept),
+                # that must dead-letter this document too, not escape and wedge the
+                # sweep behind it. See verify.py's identical guard around its own writes.
+                for claim, is_selected in zip(extraction.claims, selected, strict=True):
+                    session.add(
+                        Claim(
+                            document_id=document.id,
+                            text=claim.text,
+                            quote=claim.quote,
+                            attributed_to=claim.attributed_to,
+                            attribution_type=claim.attribution_type,
+                            cited_source=claim.cited_source,
+                            cited_source_url=claim.cited_source_url,
+                            claim_type=claim.claim_type,
+                            checkworthiness=claim.checkworthiness,
+                            selected_for_verification=is_selected,
+                        )
                     )
-                )
-            # Claims and the stamp commit together: a crash rolls back to "not extracted".
-            document.extracted_at = datetime.now(UTC)
-            document.error = None
-            session.commit()
+                document.extracted_at = datetime.now(UTC)
+                document.error = None
+                # Claims and the stamp commit together: a crash rolls back to "not extracted".
+                session.commit()
+            except Exception as exc:  # one bad document must never wedge the sweep
+                # Discard whatever this document half-wrote before recording the
+                # failure, so a bad commit cannot poison the session for the documents
+                # after it.
+                session.rollback()
+                document.attempts += 1
+                document.error = str(exc)[: config.ERROR_MAX_CHARS]
+                session.commit()
+                failed += 1
+                logger.warning("extract: write failed for %s (attempt %d): %s", document.url, document.attempts, exc)
+                continue
 
             documents_done += 1
             claims_written += len(extraction.claims)

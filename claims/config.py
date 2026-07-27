@@ -68,8 +68,9 @@ ERROR_MAX_CHARS = 1000
 
 # --- The verification gate ---
 # Only empirical claims are checkable; the rest are stored and shown, never spent on.
+# The full vocabulary is enforced upstream of this, at the API: see
+# extract.ExtractedClaim.claim_type's Literal.
 CHECKABLE_CLAIM_TYPE = "empirical"
-CLAIM_TYPES = frozenset({"empirical", "predictive", "normative", "opinion"})
 # Claims verified per document, the top N by checkworthiness.
 VERIFY_MAX_PER_DOCUMENT = 8
 # A floor as well as a ranking cutoff: a document whose best claim is weak gets zero

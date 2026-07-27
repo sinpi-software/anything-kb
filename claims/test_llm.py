@@ -163,6 +163,19 @@ def test_complete_raises_when_the_model_returns_no_content(monkeypatch: Any) -> 
         complete(model="m", system="s", user="u", schema_name="thing", schema=_Thing)
 
 
+def test_complete_raises_a_named_error_when_the_response_is_truncated(monkeypatch: Any) -> None:
+    """A response cut off at the token limit is truncated JSON. Without reading
+    finish_reason, that surfaces four layers away as a bare JSONDecodeError — this
+    pins that it instead names the token limit, so a human reader never sees
+    "could not be checked: Unterminated string starting at line 1 column ..."."""
+    _patch_post(
+        monkeypatch,
+        {"choices": [{"finish_reason": "length", "message": {"content": '{"name": "x"'}}]},
+    )
+    with pytest.raises(LLMError, match="token limit"):
+        complete(model="m", system="s", user="u", schema_name="thing", schema=_Thing)
+
+
 def test_complete_raises_when_there_are_no_choices(monkeypatch: Any) -> None:
     _patch_post(monkeypatch, {"choices": []})
     with pytest.raises(LLMError):

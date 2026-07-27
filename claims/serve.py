@@ -40,9 +40,16 @@ def deployments() -> list[Any]:
         # submit-url takes a URL: there is nothing for a cron to submit. Trigger it
         # from the UI with a parameter, or run `uv run python submit.py <url>`.
         submit_url.to_deployment(name="submit-url"),
-        extract_claims.to_deployment(name="extract-claims", schedules=_schedules(EXTRACT_CRON)),
-        verify_claims.to_deployment(name="verify-claims", schedules=_schedules(VERIFY_CRON)),
-        report_documents.to_deployment(name="report-documents", schedules=_schedules(REPORT_CRON)),
+        # concurrency_limit=1: each sweep is a batch against a schedule that does not
+        # bound how long a run takes, so overlap is expected, not exotic. Two
+        # overlapping extract runs would duplicate every claim of a document (no
+        # unique constraint on claims_claims); two overlapping verify runs would spend
+        # twice the LLM calls the batch size budgeted for.
+        extract_claims.to_deployment(name="extract-claims", schedules=_schedules(EXTRACT_CRON), concurrency_limit=1),
+        verify_claims.to_deployment(name="verify-claims", schedules=_schedules(VERIFY_CRON), concurrency_limit=1),
+        report_documents.to_deployment(
+            name="report-documents", schedules=_schedules(REPORT_CRON), concurrency_limit=1
+        ),
     ]
 
 

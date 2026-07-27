@@ -1,5 +1,6 @@
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -74,12 +75,16 @@ def test_render_report_handles_a_document_with_no_claims() -> None:
 def scenario() -> Any:
     document_ids: list[str] = []
 
-    def _make(claims: list[dict[str, Any]], evidence: dict[int, list[dict[str, Any]]] | None = None) -> str:
+    def _make(
+        claims: list[dict[str, Any]],
+        evidence: dict[int, list[dict[str, Any]]] | None = None,
+        title: str = "A headline",
+    ) -> str:
         with get_postgres_session() as session:
             document = Document(
                 url=f"https://example.com/{os.urandom(4).hex()}",
                 canonical_url=f"https://example.com/{os.urandom(4).hex()}",
-                title="A headline",
+                title=title,
                 full_text="Body.",
                 extracted_at=datetime.now(UTC),
             )
@@ -169,3 +174,36 @@ def test_report_does_not_report_the_same_document_twice(scenario: Any) -> None:
     report_documents()
     with get_postgres_session() as session:
         assert len(session.scalars(select(Report).where(Report.document_id == document_id)).all()) == 1
+
+
+def test_report_write_failure_does_not_block_a_later_document(monkeypatch: Any, scenario: Any) -> None:
+    """An unwritable OUTPUT_DIR, a full disk, or any other failure writing one
+    document's report must not escape and skip every candidate after it. There is no
+    attempts column on this path — a report failure is worth retrying next run — so the
+    failed document is simply left unreported, not dead-lettered."""
+    bad_id = scenario(
+        [{"selected_for_verification": True, "verdict": "supported", "confidence": 0.9}], title="Bad doc"
+    )
+    good_id = scenario(
+        [{"selected_for_verification": True, "verdict": "supported", "confidence": 0.9}], title="Good doc"
+    )
+
+    original_write_text = Path.write_text
+
+    def _write_text(self: Path, *args: Any, **kwargs: Any) -> int:
+        if self.name.startswith("bad-doc"):
+            raise OSError("disk full")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _write_text)
+    report_documents()
+
+    with get_postgres_session() as session:
+        bad = session.get(Document, bad_id)
+        good = session.get(Document, good_id)
+        assert bad is not None
+        assert bad.reported_at is None
+        assert good is not None
+        assert good.reported_at is not None
+        assert session.scalars(select(Report).where(Report.document_id == bad_id)).all() == []
+        assert session.scalars(select(Report).where(Report.document_id == good_id)).one()

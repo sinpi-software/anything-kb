@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from sqlalchemy import ForeignKey, UniqueConstraint, func
@@ -19,7 +20,15 @@ class Base(DeclarativeBase):
 
 class _BaseModel(Base):
     __abstract__ = True
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=sql_text("gen_random_uuid()"))
+    # Mapped[uuid.UUID], not Mapped[str]: the sibling neonews app annotates its UUID
+    # columns as str, a convention inherited from there that this app does not repeat.
+    # It already hid a real defect here — report.py once keyed a dict by the raw UUID
+    # instead of str(claim.id), silently dropping evidence from every report, while
+    # mypy and the full test suite stayed green. A type checker that certifies
+    # incorrect code as correct is not a convention worth carrying forward.
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sql_text("gen_random_uuid()")
+    )
     created_at: Mapped[datetime] = mapped_column(_TS, nullable=False, server_default=func.now())
 
 
@@ -50,7 +59,9 @@ class Claim(_BaseModel):
 
     __tablename__ = "claims_claims"
 
-    document_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("claims_documents.id"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("claims_documents.id"), nullable=False
+    )
     text: Mapped[str] = mapped_column(TEXT, nullable=False)  # normalized to stand alone
     quote: Mapped[str | None] = mapped_column(TEXT, nullable=True)  # verbatim span
     # Who asserted it, in-document.
@@ -81,7 +92,7 @@ class Evidence(_BaseModel):
 
     __tablename__ = "claims_evidence"
 
-    claim_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("claims_claims.id"), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims_claims.id"), nullable=False)
     url: Mapped[str] = mapped_column(TEXT, nullable=False)
     title: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     snippet: Mapped[str | None] = mapped_column(TEXT, nullable=True)
@@ -92,7 +103,9 @@ class Evidence(_BaseModel):
 class Report(_BaseModel):
     __tablename__ = "claims_reports"
 
-    document_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("claims_documents.id"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("claims_documents.id"), nullable=False
+    )
     generated_at: Mapped[datetime] = mapped_column(_TS, nullable=False)
     path: Mapped[str] = mapped_column(TEXT, nullable=False)
     claim_count: Mapped[int] = mapped_column(INTEGER, nullable=False)

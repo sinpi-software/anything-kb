@@ -72,7 +72,7 @@ carries the relevant fact, its `published_at` date if you can determine it (ISO 
 
 Prefer primary sources over aggregators. Quote snippets verbatim; never paraphrase into them.
 Return only sources you actually consulted. If you find nothing relevant, return an empty list —
-an empty list is a useful answer and a fabricated source is not."""
+an empty list is a useful answer and a fabricated source is not. Return at most 8 sources."""
 
 _REFUTATION_SYSTEM = """You are a skeptical fact-checker. Your job is to find the strongest case
 AGAINST one claim: evidence that it is false, that it is misleading as stated, or that it omits
@@ -85,7 +85,8 @@ hand.
 Return sources in the same shape as any research task: `url`, `title`, a verbatim `snippet`,
 `published_at` if determinable, and a `stance` of "contradicts" or "context". If after genuine
 effort you cannot find anything against the claim, return an empty list and say so by returning
-nothing — do not manufacture a weak objection, and never invent a source."""
+nothing — do not manufacture a weak objection, and never invent a source. Return at most 8
+sources."""
 
 _JUDGE_SYSTEM = """You are adjudicating one claim on the evidence below. You have no web access:
 reason ONLY over the evidence given. If it does not settle the question, say so.

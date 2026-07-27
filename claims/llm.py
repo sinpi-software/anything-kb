@@ -134,6 +134,13 @@ def complete(
     choices = payload.get("choices") or []
     if not choices:
         raise LLMError(f"OpenRouter returned no choices: {str(payload)[:500]}")
+    # Named here rather than left to surface as a downstream JSONDecodeError: a
+    # response cut off at the token limit is truncated JSON, and the parse failure
+    # four layers away gives no hint of why — it can reach a human reader as a bare
+    # "could not be checked: Unterminated string starting at line 1 column ...".
+    finish_reason = choices[0].get("finish_reason")
+    if finish_reason == "length":
+        raise LLMError(f"{model} response truncated at the token limit (finish_reason=length)")
     message = choices[0].get("message") or {}
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():

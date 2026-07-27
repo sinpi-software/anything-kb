@@ -22,7 +22,11 @@ mostly confirms it. The third call, the judge, has **no** web access: it reasons
 over evidence stored as rows, so no rationale rests on something you cannot click.
 
 Evidence the model emits is filtered against OpenRouter's own `url_citation`
-annotations, so an invented URL never reaches the database.
+annotations, so an invented URL is dropped before it reaches the database — *when the
+response carries annotations at all*. A response with none is kept unchecked rather
+than discarded outright: "we cannot tell what was cited" is not "nothing was cited".
+See `verify.ground_evidence` and `RESEARCH_MODEL`'s note below, which is what keeps
+this exception rare in practice.
 
 Only empirical claims above `CHECKWORTHINESS_MIN`, capped at
 `VERIFY_MAX_PER_DOCUMENT`, are checked. Predictions and value judgments are stored
@@ -143,13 +147,14 @@ something to check against. `had_annotations: False` means it does not, silently
 Verified 2026-07-27: `google/gemini-2.5-flash` (in use), `anthropic/claude-sonnet-4.5`,
 and `perplexity/sonar` all pass; `openai/gpt-5-mini` fails.
 
-`claims_reports` has no unique constraint on `document_id`. Sequential runs of
-`report-documents` are idempotent by construction (`reported_at` gates the sweep), but
-two concurrent runs could both read `reported_at IS NULL` for the same document before
-either commits, and both would insert a report row. The compose deployment sets
-`CLAIMS_REPORT_CRON` to `""`, so that path never fires two runs on its own — but under
-`serve.py` with a real cron, nothing stops the next scheduled run from starting while
-a slow previous run is still in flight (`REPORT_CRON_DEFAULT` is `*/20 * * * *` against
-a `limit` of several concurrent flow runs), so the exposure is live wherever a
-schedule is. Noted here rather than fixed with a schema change, which is out of scope
-for this task.
+`claims_reports` has no unique constraint on `document_id`, so two concurrent runs of
+`report-documents` could both read `reported_at IS NULL` for the same document before
+either commits, and both would insert a report row — the same shape of problem
+`extract-claims` has with duplicate claims (no unique constraint on `claims_claims`)
+and `verify-claims` has with doubled spend. All three are sweeps against a schedule
+that does not bound how long a run takes (e.g. `VERIFY_BATCH_SIZE=25` × 3 calls ÷
+`VERIFY_CONCURRENCY=4` can run up to 37 minutes against a `*/15` cron), so overlap is
+expected rather than exotic. `extract-claims`, `verify-claims`, and `report-documents`
+are each registered in `serve.py` with `concurrency_limit=1`, so Prefect refuses to
+start a new run of one of these deployments while a previous run is still in flight;
+`submit-url` is left unlimited since it is parameterized and idempotent.

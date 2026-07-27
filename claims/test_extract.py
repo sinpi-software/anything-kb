@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from sqlalchemy import delete, select
@@ -15,8 +15,10 @@ from extract import ExtractedClaim, extract_claims, select_for_verification
 from fetch import FetchedPage, NoReadableTextError
 from models import Claim, Document
 
+_ClaimType = Literal["empirical", "predictive", "normative", "opinion"]
 
-def _claim(claim_type: str, checkworthiness: float, text: str = "A thing.") -> ExtractedClaim:
+
+def _claim(claim_type: _ClaimType, checkworthiness: float, text: str = "A thing.") -> ExtractedClaim:
     return ExtractedClaim(text=text, claim_type=claim_type, checkworthiness=checkworthiness)
 
 
@@ -241,10 +243,12 @@ def test_extract_fetch_survives_a_crash_during_the_llm_call(monkeypatch: Any, do
         assert row.fetched_at is not None
 
 
-def test_extract_rolls_back_claims_when_stamping_the_document_fails(monkeypatch: Any, document: Any) -> None:
-    """Claims and the extracted_at stamp are committed together: a failure after the
-    claims are staged but before the commit must roll back the whole transaction,
-    never leaving orphaned Claim rows for a document that never got its stamp."""
+def test_extract_dead_letters_the_document_when_stamping_it_fails(monkeypatch: Any, document: Any) -> None:
+    """Claims and the extracted_at stamp commit together: a failure after the claims
+    are staged but before the commit must roll back the whole transaction — never
+    leaving orphaned Claim rows for a document that never got its stamp — and, since
+    that commit is now guarded the same way verify.py's is, dead-letter the document
+    for a retry instead of letting the exception escape and wedge the sweep."""
     document_id = document(full_text="Body.", fetched_at=datetime.now(UTC))
     _patch_llm(monkeypatch, [{"text": "A.", "claim_type": "empirical", "checkworthiness": 0.9}])
 
@@ -254,11 +258,44 @@ def test_extract_rolls_back_claims_when_stamping_the_document_fails(monkeypatch:
             raise RuntimeError("clock exploded")
 
     monkeypatch.setattr(extract, "datetime", _BoomClock)
-    with pytest.raises(RuntimeError, match="clock exploded"):
-        extract_claims()
+    extract_claims()
 
     with get_postgres_session() as session:
         assert session.scalars(select(Claim).where(Claim.document_id == document_id)).all() == []
         row = session.get(Document, document_id)
         assert row is not None
         assert row.extracted_at is None
+        assert row.attempts == 1
+        assert "clock exploded" in (row.error or "")
+
+
+def test_extract_dead_letters_a_document_whose_claim_postgres_rejects(monkeypatch: Any, document: Any) -> None:
+    """The wedge the reviewer reproduced: a claim's `text` containing a NUL byte is
+    legal JSON (`\\u0000`) but Postgres TEXT refuses it, so the insert raises during
+    session.commit(). Without a guard around the claim writes, that exception would
+    escape extract_claims() entirely: attempts stays 0 (the document is re-selected
+    forever), error stays NULL (invisible to `WHERE error IS NOT NULL`), and — because
+    the sweep orders by created_at — this document sits permanently at the head of the
+    batch, blocking every document submitted after it. Fails without the guard: the
+    RuntimeError-turned-ValueError escapes and this assertion never runs cleanly."""
+    document_id = document(full_text="Body.", fetched_at=datetime.now(UTC))
+    _patch_llm(monkeypatch, [{"text": "bad claim \x00 text", "claim_type": "empirical", "checkworthiness": 0.9}])
+
+    extract_claims()
+
+    with get_postgres_session() as session:
+        assert session.scalars(select(Claim).where(Claim.document_id == document_id)).all() == []
+        row = session.get(Document, document_id)
+        assert row is not None
+        assert row.attempts == 1
+        assert row.error is not None
+        assert row.extracted_at is None
+
+
+def test_strict_schema_preserves_the_claim_type_enum() -> None:
+    """`enum` is not in llm._UNSUPPORTED_KEYWORDS, so it survives strict_schema and
+    OpenAI strict mode enforces claim_type's vocabulary at the API — the assertion
+    proving the constraint actually reaches the model, not just pydantic on the way
+    back in."""
+    schema = llm.strict_schema(ExtractedClaim.model_json_schema())
+    assert set(schema["properties"]["claim_type"]["enum"]) == {"empirical", "predictive", "normative", "opinion"}

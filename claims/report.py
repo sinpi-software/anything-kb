@@ -146,28 +146,44 @@ def report_documents() -> dict[str, int]:
 
             evidence_by_claim: dict[str, list[Evidence]] = defaultdict(list)
             for claim in claims:
-                for evidence in session.scalars(select(Evidence).where(Evidence.claim_id == claim.id)):
+                # Deterministic order: `body` is the durable artifact, and two renders
+                # of the same document should not differ in evidence order.
+                rows = session.scalars(
+                    select(Evidence).where(Evidence.claim_id == claim.id).order_by(Evidence.created_at, Evidence.id)
+                )
+                for evidence in rows:
                     evidence_by_claim[str(claim.id)].append(evidence)
 
             generated_at = datetime.now(UTC)
             markdown = render_report(document, claims, evidence_by_claim, generated_at)
-            output_dir = Path(config.OUTPUT_DIR)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            path = output_dir / f"{_slug(document)}-{generated_at.strftime('%Y-%m-%d-%H%M%S')}.md"
-            path.write_text(markdown, encoding="utf-8")
+            try:
+                # The write and the commit live inside this same try: an unwritable
+                # OUTPUT_DIR, a full disk, or a DB error must dead-letter this document
+                # for the next run, not escape and skip every candidate after it. There
+                # is no attempts column on this path — a report failure is worth
+                # retrying next run, and the sweep is cheap (no LLM calls) — so nothing
+                # is incremented here, only rolled back.
+                output_dir = Path(config.OUTPUT_DIR)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                path = output_dir / f"{_slug(document)}-{generated_at.strftime('%Y-%m-%d-%H%M%S')}.md"
+                path.write_text(markdown, encoding="utf-8")
 
-            session.add(
-                Report(
-                    document_id=document.id,
-                    generated_at=generated_at,
-                    path=str(path),
-                    claim_count=len(claims),
-                    verified_count=sum(1 for claim in claims if claim.verdict is not None),
-                    body=markdown,
+                session.add(
+                    Report(
+                        document_id=document.id,
+                        generated_at=generated_at,
+                        path=str(path),
+                        claim_count=len(claims),
+                        verified_count=sum(1 for claim in claims if claim.verdict is not None),
+                        body=markdown,
+                    )
                 )
-            )
-            document.reported_at = generated_at
-            session.commit()
+                document.reported_at = generated_at
+                session.commit()
+            except Exception as exc:  # one bad document must never sink the sweep
+                session.rollback()
+                logger.warning("report: failed for %s: %s", document.canonical_url, exc)
+                continue
 
             written += 1
             logger.info("report: %s → %s (%d claims)", document.canonical_url, path, len(claims))

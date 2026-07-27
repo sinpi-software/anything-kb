@@ -237,14 +237,19 @@ Context:       <url> — "…Q1 alone fell 19%…"
 
 | failure | handling |
 | --- | --- |
-| Fetch failure (network, timeout, blocked URL) | `attempts++`, `error` recorded, retried to `MAX_EXTRACT_ATTEMPTS` |
-| Empty extraction (page loads, no readable text) | dead-lettered at once, `error="no readable text"` |
+| Fetch failure (network, timeout, DNS) | `attempts++`, `error` recorded, retried to `MAX_EXTRACT_ATTEMPTS` |
+| Blocked URL (`BlockedURLError` — not a public http(s) endpoint) | dead-lettered at once |
+| Empty extraction (page loads, no readable text) | dead-lettered at once |
 | Zero claims extracted | not a failure; `extracted_at` stamps, the report says so |
 | One claim's verify call fails | caught per claim, `attempts++`; the sweep continues |
 | Verify exhausts its attempts | dead-lettered with `error` set and **`verdict` left NULL** |
 
-Empty extraction is deterministic — a JS-rendered page yields nothing on the third
-try too — so retrying only spends attempts to learn the same thing three times.
+Empty extraction and a blocked URL are both deterministic — a JS-rendered page yields
+nothing on the third try too, and a host that resolves to loopback resolves there
+again — so retrying only spends attempts to learn the same thing three times. Both are
+caught by their own exception names rather than as `ValueError`: `NoReadableTextError`,
+`BlockedURLError`, and `urlsplit`'s own parse error all subclass it, and conflating
+them would misfile a malformed URL as a content failure.
 Dead-lettering it means setting `attempts = MAX_EXTRACT_ATTEMPTS` alongside the
 error, which is what drops the row out of the sweep predicate; there is no separate
 "abandoned" flag to keep in sync.

@@ -1,7 +1,7 @@
 [project]
 name = "claims"
 version = "0.1.0"
-description = "Add your description here"
+description = "Extract, attribute, and verify the claims a page makes against the web."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

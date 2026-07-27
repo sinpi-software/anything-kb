@@ -208,6 +208,53 @@ services:
       - ./neonews:/app
     command: sh -c "uv sync --frozen --no-dev && exec python serve.py"
 
+  claims-migrate:
+    build: ./claims
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      CLAIMS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+    volumes:
+      - ./claims:/app
+    # Its own Alembic chain, isolated from ingestion's and neonews' (see their
+    # migrate services above) by a version_table specific to claims.
+    command: sh -c "uv sync --frozen --no-dev && exec alembic upgrade head"
+    restart: "no"
+
+  claims-serve:
+    build: ./claims
+    restart: unless-stopped
+    depends_on:
+      prefect:
+        condition: service_healthy
+      claims-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env.sample
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    environment:
+      CLAIMS_POSTGRES_URL: postgresql://ingestion:ingestion@postgres:5432/ingestion
+      PREFECT_API_URL: http://prefect:4200/api
+      # Empty cron means registered but unscheduled. extract and verify each call
+      # OpenRouter, so a stack left running while editing would spend credits for
+      # nothing. Trigger runs from the UI instead.
+      CLAIMS_EXTRACT_CRON: ""
+      CLAIMS_VERIFY_CRON: ""
+      CLAIMS_REPORT_CRON: ""
+    volumes:
+      - ./claims:/app
+    command: sh -c "uv sync --frozen --no-dev && exec python serve.py"
+
   # `profiles` keeps these out of a bare `docker compose up`. Start them with:
   #   docker compose --profile ui up
   app:

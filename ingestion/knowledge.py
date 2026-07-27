@@ -99,7 +99,20 @@ _ENTITY_QUALITY = (
     "named person, organization, place, product, work, law, or named event. Do NOT extract vague "
     "descriptive phrases (e.g. 'a two-year legal battle'), durations, quantities, dates, generic "
     "concepts, or a phrase that merely restates or is a fragment of another entity — fold such detail "
-    "into the relevant entity's description rather than creating a node for it."
+    "into the relevant entity's description rather than creating a node for it.\n"
+    # An abstract node has no specific relation to anything, so every edge it owns falls back to the
+    # catch-all. Measured over one 25-article ingest: Topic entities were 95% "Related to", Law 81%
+    # and Event 75%, against 20% for Person and 28% for Place — 67 of the 113 catch-all edges came
+    # from these three. The clause above already bars "generic concepts", but "named event" read as
+    # permission to mint "EU fine against Google" and "Arrest incident at the casino", whose only
+    # possible links to Google and the arrested man are untypeable. Name that failure mode directly.
+    "Never create a node for a subject or theme label ('Antitrust', 'Public safety', 'Housing') — a "
+    "topic is not a thing that acts or can be acted on; it belongs in a description. Never turn an "
+    "action into an entity when you can state as a relationship between the concrete entities "
+    "involved: 'EU fine against Google' is 'European Union -[Fined]-> Google', and 'Arrest incident "
+    "at the casino' is 'Police -[Arrested]-> the person'. Reserve event entities for occurrences "
+    "carrying their own standing name that outlives this document — a named summit, election, "
+    "disaster, or ceremony that other documents would refer to by that same name."
 )
 
 # A graph coheres when entities are anchored to the recurring higher-level "hub" entities that many
@@ -150,7 +163,12 @@ def build_extraction_messages(
             "type fits, coin a concise new type name and use it. Do not force-fit and do not create "
             "types for incidental mentions. Only coin an ENTITY type for a category of durable, "
             "individually-referenceable things (people, organizations, places, works, events) — never "
-            "for time windows, durations, dates, quantities, measurements, or descriptive attributes.\n"
+            "for time windows, durations, dates, quantities, measurements, or descriptive attributes, "
+            # 'Topic' self-discovered through this rule and became the single worst type in the graph
+            # (95% of its edges were the catch-all). A subject label is not a durable referenceable
+            # thing, but nothing in the ban list said so, so the gate admitted it.
+            "and never for subjects, themes, or topics — a category whose members are things a "
+            "document is ABOUT rather than things that act is not an entity type.\n"
             # That durability rule reads as entity-only guidance, and a relationship can never be a
             # "durable, individually-referenceable thing" — so the model declined to coin relationship
             # types at all. Across two full ingests the entity vocabulary grew from 4 types to 9 while

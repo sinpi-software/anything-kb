@@ -62,11 +62,28 @@ for symmetry, `CLAIMS_REPORT_CRON`) to `""` for the local stack: a Compose stack
 running while you edit code must not bill you for it. Trigger a run manually from the
 Prefect UI, or set a real cron in your own `.env`.
 
+Easiest path is the whole stack in Docker, from the repo root:
+
+```bash
+docker compose up
+```
+
+`claims-migrate` runs `alembic upgrade head` first; `claims-serve` waits for it to
+finish (`depends_on: ... condition: service_completed_successfully`) before starting,
+so the tables always exist before the flows do. claims runs as `claims-serve`, its
+four flows registered unscheduled. Trigger them from
+http://localhost:4200/deployments. `docker compose restart claims-serve` picks up a
+flow change — `serve()` has no hot reload.
+
 ## Test
 
 Postgres-backed tests run against their own database, never the operator's live one.
 This is a **one-time** setup — create the database once and every test run after that
 just needs `CLAIMS_TEST_POSTGRES_URL` pointed at it (the default already does):
+
+`alembic upgrade head` on its own targets whatever `CLAIMS_POSTGRES_URL` already
+points at — your real database — so the one-time migration below sets
+`CLAIMS_POSTGRES_URL` explicitly to `claims_test` for that single command only:
 
 ```bash
 createdb -U ingestion -h localhost claims_test
@@ -95,7 +112,10 @@ citations — and the grounding filter needs exactly those.
 `claims_reports` has no unique constraint on `document_id`. Sequential runs of
 `report-documents` are idempotent by construction (`reported_at` gates the sweep), but
 two concurrent runs could both read `reported_at IS NULL` for the same document before
-either commits, and both would insert a report row. `report-documents` never runs
-concurrently with itself in `serve.py` or the compose deployment, so this is a
-theoretical exposure rather than an observed one — noted here rather than fixed with a
-schema change, which is out of scope for this task.
+either commits, and both would insert a report row. The compose deployment sets
+`CLAIMS_REPORT_CRON` to `""`, so that path never fires two runs on its own — but under
+`serve.py` with a real cron, nothing stops the next scheduled run from starting while
+a slow previous run is still in flight (`REPORT_CRON_DEFAULT` is `*/20 * * * *` against
+a `limit` of several concurrent flow runs), so the exposure is live wherever a
+schedule is. Noted here rather than fixed with a schema change, which is out of scope
+for this task.

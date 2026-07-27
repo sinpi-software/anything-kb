@@ -2,8 +2,17 @@
 
 # --- LLM (OpenRouter) ---
 OPENROUTER_API_KEY_ENV = "INGESTION_OPENROUTER_API_KEY"
-# Default model for relevance judging and article synthesis.
+# Default model for relevance judging: a yes/no on text already in hand, which needs nothing more.
 LLM_MODEL = "openai/gpt-5-nano"
+# Article synthesis, the only call that reads the web (see SYNTHESIS_WEB_SEARCH_MAX_RESULTS), so it
+# needs a model that can actually use what it reads. Benchmarked on three subjects with the plugin
+# attached: gpt-5-nano averaged 335 characters, left Clark County with no `## Background` at all,
+# and once returned schema-valid JSON with an empty `article` field, which would store a blank
+# article on the node. This averaged 2374 characters, covered all three, and placed Bob Ferguson as
+# governor since 2025 where recall alone still said attorney general. Without search it hedges
+# instead of identifying ("Clark County is a common name for counties in several U.S. states,
+# including Nevada"), so the model and the plugin are one change, not two.
+SYNTHESIS_MODEL = "deepseek/deepseek-v4-flash"
 # Extraction gets its own model, and the most capable one in the stack. A new entity's article is
 # its extracted description stored verbatim — synthesize_article runs only when an entity is merged,
 # and most entities are named by exactly one document, so extraction authors the great majority of
@@ -27,6 +36,15 @@ TYPE_GATE_MODEL = "openai/gpt-5-mini"
 # Verified on OpenRouter to support `structured_outputs`, which this call requires — the
 # merge check sends a strict json_schema and a model without it would fail every request.
 RESOLUTION_MODEL = "deepseek/deepseek-v4-flash"
+# Web results attached to article synthesis, or 0 to disable. Synthesis is the only call where
+# outside knowledge is the product: its `## Background` section is written from what the model can
+# recall and is omitted whenever it cannot positively identify the subject, so without search the
+# section never appears for anything less than famous. The other call sites are deliberately left
+# off — extraction must report what the document states rather than what the web says about it, and
+# both gates judge the user's own vocabulary, which nothing external informs.
+# Cost scales with ENTITY count, not article count: one 24-article ingest produced 175 entities,
+# and synthesis runs on first sighting as well as on merge. Budget accordingly before raising this.
+SYNTHESIS_WEB_SEARCH_MAX_RESULTS = 3
 # Per-request timeout. Without it a stuck reasoning model hangs the worker forever.
 LLM_TIMEOUT_MS = 90_000
 # Max concurrent OpenRouter calls, enforced by a threading.Semaphore in knowledge._chat.

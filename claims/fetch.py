@@ -76,6 +76,8 @@ def fetch_page(url: str) -> FetchedPage:
       BlockedURLError — the URL is not a public http(s) endpoint. Also deterministic,
         and also a dead-letter: a host that resolves to loopback resolves there again
         on the retry.
+      net_guard.HostResolutionError — DNS lookup itself failed. Transient, unlike
+        BlockedURLError: a name that will not resolve now may resolve on the retry.
       OSError and other network errors — transient; the caller retries.
 
     Note that BlockedURLError and NoReadableTextError are both ValueError subclasses,

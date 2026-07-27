@@ -31,6 +31,12 @@ class BlockedURLError(ValueError):
     """A URL was refused because it isn't a public http(s) endpoint."""
 
 
+class HostResolutionError(Exception):
+    """DNS lookup failed. Distinct from BlockedURLError because it is transient —
+    a name that will not resolve now may resolve on the retry, and dead-lettering
+    a document over a momentary DNS blip loses it permanently."""
+
+
 def _is_public_ip(ip: str) -> bool:
     address = ipaddress.ip_address(ip)
     return not (
@@ -44,11 +50,17 @@ def _is_public_ip(ip: str) -> bool:
 
 
 def assert_public_url(url: str) -> str:
-    """Return `url` if it is a public http(s) endpoint, else raise BlockedURLError.
+    """Return `url` if it is a public http(s) endpoint, else raise BlockedURLError or
+    HostResolutionError.
 
     Every DNS answer for the host must be public, so a hostname resolving even
     partly to a private/loopback/link-local/reserved range is refused — closing
     DNS-rebinding and metadata-endpoint vectors.
+
+    A lookup that fails outright (HostResolutionError) is kept separate from one
+    that resolves somewhere disallowed (BlockedURLError): the former is transient
+    and worth retrying, the latter is a standing policy violation that will not
+    change on retry.
     """
     parts = urlsplit(url)
     if parts.scheme not in ALLOWED_SCHEMES:
@@ -59,7 +71,7 @@ def assert_public_url(url: str) -> str:
     try:
         infos = socket.getaddrinfo(host, parts.port or None, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, OSError) as exc:
-        raise BlockedURLError(f"could not resolve host: {host}") from exc
+        raise HostResolutionError(f"could not resolve host: {host}") from exc
     blocked = [ip for ip in {str(info[4][0]) for info in infos} if not _is_public_ip(ip)]
     if blocked:
         raise BlockedURLError(f"host {host} resolves to non-public address(es): {', '.join(blocked)}")

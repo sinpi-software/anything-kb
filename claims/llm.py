@@ -36,11 +36,32 @@ class LLMResult(BaseModel):
     had_annotations: bool
 
 
+# Keywords OpenAI's strict structured-output mode rejects. Dropping them costs
+# nothing: pydantic re-validates the parsed response against the same Field
+# constraints, so `ge`/`le` (etc.) are still enforced where it counts.
+_UNSUPPORTED_KEYWORDS = (
+    "default",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "format",
+    "minItems",
+    "maxItems",
+)
+
+
 def strict_schema(node: Any) -> Any:
     """OpenAI structured outputs require additionalProperties:false and every key
-    required on each object; pydantic's model_json_schema() emits neither."""
+    required on each object; pydantic's model_json_schema() emits neither. It also
+    rejects numeric/string/array constraint keywords (minimum, maxLength, ...) on
+    properties, which pydantic happily emits for any Field(ge=..., le=...) etc."""
     if isinstance(node, dict):
-        node.pop("default", None)
+        for keyword in _UNSUPPORTED_KEYWORDS:
+            node.pop(keyword, None)
         if node.get("type") == "object" and node.get("properties"):
             node["additionalProperties"] = False
             node["required"] = list(node["properties"])

@@ -2,7 +2,7 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 import llm
 from llm import LLMError, complete, strict_schema
@@ -11,6 +11,10 @@ from llm import LLMError, complete, strict_schema
 class _Thing(BaseModel):
     name: str
     count: int = 3
+
+
+class _Scored(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +29,22 @@ def test_strict_schema_forbids_extra_keys_and_requires_every_property() -> None:
     assert schema["additionalProperties"] is False
     assert sorted(schema["required"]) == ["count", "name"]
     assert "default" not in schema["properties"]["count"]
+
+
+def test_strict_schema_strips_numeric_bounds_openai_rejects() -> None:
+    """OpenAI's strict structured-output mode 400s on minimum/maximum. Field(ge=, le=)
+    is exactly what ExtractedClaim.checkworthiness uses, so a real extraction call
+    would fail every time if these leaked into the schema sent over the wire."""
+    schema = strict_schema(_Scored.model_json_schema())
+    assert "minimum" not in schema["properties"]["score"]
+    assert "maximum" not in schema["properties"]["score"]
+
+
+def test_strict_schema_stripping_the_bound_does_not_weaken_pydantic_validation() -> None:
+    """Proof that stripping minimum/maximum from the *outgoing* schema costs nothing:
+    pydantic still enforces ge/le on the model itself when the response is parsed."""
+    with pytest.raises(ValidationError):
+        _Scored.model_validate({"score": 1.5})
 
 
 def _patch_post(

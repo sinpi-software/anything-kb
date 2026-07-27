@@ -144,14 +144,14 @@ def extract_claims() -> dict[str, int]:
                     # "abandoned" flag to keep in sync. Caught by name, never as
                     # ValueError: both subclass it, as does urlsplit's own parse error.
                     document.attempts = config.MAX_EXTRACT_ATTEMPTS
-                    document.error = f"{type(exc).__name__}: {exc}"
+                    document.error = f"{type(exc).__name__}: {exc}"[: config.ERROR_MAX_CHARS]
                     session.commit()
                     failed += 1
                     logger.warning("extract: %s dead-lettered — %s", document.url, exc)
                     continue
-                except Exception as exc:  # transient: network, DNS, blocked URL
+                except Exception as exc:  # transient: network errors, DNS resolution failures
                     document.attempts += 1
-                    document.error = str(exc)[:1000]
+                    document.error = str(exc)[: config.ERROR_MAX_CHARS]
                     session.commit()
                     failed += 1
                     logger.warning(
@@ -163,7 +163,7 @@ def extract_claims() -> dict[str, int]:
                 extraction = extract_document_claims(document.full_text or "", document.title)
             except Exception as exc:
                 document.attempts += 1
-                document.error = str(exc)[:1000]
+                document.error = str(exc)[: config.ERROR_MAX_CHARS]
                 session.commit()
                 failed += 1
                 logger.warning("extract: LLM failed for %s (attempt %d): %s", document.url, document.attempts, exc)

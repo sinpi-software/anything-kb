@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 import config
 import extract
 import llm
+import net_guard
 from db import get_postgres_session
 from extract import ExtractedClaim, extract_claims, select_for_verification
 from fetch import FetchedPage, NoReadableTextError
@@ -169,3 +170,95 @@ def test_extract_retries_transient_fetch_failures(monkeypatch: Any, document: An
         row = session.get(Document, document_id)
         assert row is not None
         assert row.attempts == 1  # not dead-lettered — this one is worth retrying
+
+
+def test_extract_treats_a_bare_value_error_as_transient(monkeypatch: Any, document: Any) -> None:
+    """Guards against narrowing the dead-letter except clause to `except ValueError`.
+    NoReadableTextError and BlockedURLError both subclass ValueError, but a bare
+    ValueError (e.g. urlsplit's own parse error) must still be retried, not
+    dead-lettered — conflating them would misfile a malformed URL as a content
+    failure."""
+    document_id = document()
+
+    def _bad_url(url: str) -> FetchedPage:
+        raise ValueError("bad url")
+
+    monkeypatch.setattr(extract.fetch, "fetch_page", _bad_url)
+    extract_claims()
+    with get_postgres_session() as session:
+        row = session.get(Document, document_id)
+        assert row is not None
+        assert row.attempts == 1  # not dead-lettered
+
+
+def test_extract_retries_host_resolution_failures(monkeypatch: Any, document: Any) -> None:
+    """HostResolutionError is transient, unlike BlockedURLError: a name that will not
+    resolve now may resolve on the retry, so a momentary DNS blip must not burn a
+    document permanently."""
+    document_id = document()
+
+    def _dns_fail(url: str) -> FetchedPage:
+        raise net_guard.HostResolutionError("could not resolve host")
+
+    monkeypatch.setattr(extract.fetch, "fetch_page", _dns_fail)
+    extract_claims()
+    with get_postgres_session() as session:
+        row = session.get(Document, document_id)
+        assert row is not None
+        assert row.attempts == 1  # not dead-lettered
+
+
+class _Crash(BaseException):
+    """Not an Exception subclass — simulates the process dying mid-run, distinct from
+    a normal component failure that the flow's `except Exception` catches and logs."""
+
+
+def test_extract_fetch_survives_a_crash_during_the_llm_call(monkeypatch: Any, document: Any) -> None:
+    """Fetching commits in its own transaction before the LLM call runs, so even a
+    genuine crash mid-extraction (not just a caught exception) leaves the fetched page
+    durably saved. Pinned by crashing with a BaseException the flow does not catch:
+    if the interim commit were removed, the fetch would live only in the aborted
+    transaction and vanish when the session closes on the way out."""
+    document_id = document()
+
+    def _fake_fetch(url: str) -> FetchedPage:
+        return FetchedPage(title="T", author=None, published_at=None, text="Body.", truncated=False)
+
+    monkeypatch.setattr(extract.fetch, "fetch_page", _fake_fetch)
+
+    def _crash(**kwargs: Any) -> None:
+        raise _Crash("simulated crash")
+
+    monkeypatch.setattr(extract.llm, "complete", _crash)
+
+    with pytest.raises(_Crash):
+        extract_claims()
+
+    with get_postgres_session() as session:
+        row = session.get(Document, document_id)
+        assert row is not None
+        assert row.full_text == "Body."
+        assert row.fetched_at is not None
+
+
+def test_extract_rolls_back_claims_when_stamping_the_document_fails(monkeypatch: Any, document: Any) -> None:
+    """Claims and the extracted_at stamp are committed together: a failure after the
+    claims are staged but before the commit must roll back the whole transaction,
+    never leaving orphaned Claim rows for a document that never got its stamp."""
+    document_id = document(full_text="Body.", fetched_at=datetime.now(UTC))
+    _patch_llm(monkeypatch, [{"text": "A.", "claim_type": "empirical", "checkworthiness": 0.9}])
+
+    class _BoomClock:
+        @staticmethod
+        def now(tz: Any = None) -> Any:
+            raise RuntimeError("clock exploded")
+
+    monkeypatch.setattr(extract, "datetime", _BoomClock)
+    with pytest.raises(RuntimeError, match="clock exploded"):
+        extract_claims()
+
+    with get_postgres_session() as session:
+        assert session.scalars(select(Claim).where(Claim.document_id == document_id)).all() == []
+        row = session.get(Document, document_id)
+        assert row is not None
+        assert row.extracted_at is None

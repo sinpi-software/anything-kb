@@ -49,6 +49,9 @@ FULL_TEXT_MAX_CHARS = 60_000
 EXTRACT_BATCH_SIZE = 10
 # A document that has failed this many times is dead-lettered, not re-driven.
 MAX_EXTRACT_ATTEMPTS = 3
+# Failure messages are stored on the row (Document.error / Claim.error); this bounds
+# how much of a raw exception's text lands in the database.
+ERROR_MAX_CHARS = 1000
 
 # --- The verification gate ---
 # Only empirical claims are checkable; the rest are stored and shown, never spent on.

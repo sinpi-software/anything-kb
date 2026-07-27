@@ -40,6 +40,31 @@ def test_blocks_non_public_urls(url: str, monkeypatch: pytest.MonkeyPatch) -> No
         net_guard.assert_public_url(url)
 
 
+def test_resolution_failure_is_not_a_blocked_url() -> None:
+    """A host that fails to resolve is transient (HostResolutionError), distinct from
+    one that resolves somewhere disallowed (BlockedURLError) — extract.py routes the
+    two to different retry behavior and must not be able to confuse them."""
+    assert not issubclass(net_guard.HostResolutionError, net_guard.BlockedURLError)
+    assert not issubclass(net_guard.HostResolutionError, ValueError)
+
+
+def test_unresolvable_host_raises_host_resolution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_getaddrinfo(
+        host: str, port: int | None, **kwargs: object
+    ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        raise OSError("unresolvable")
+
+    monkeypatch.setattr(net_guard.socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(net_guard.HostResolutionError):
+        net_guard.assert_public_url("https://does-not-resolve.example/x")
+
+
+def test_loopback_host_still_raises_blocked_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net_guard.socket, "getaddrinfo", lambda host, port, **kw: [(2, 1, 6, "", ("127.0.0.1", 80))])
+    with pytest.raises(net_guard.BlockedURLError):
+        net_guard.assert_public_url("http://127.0.0.1/x")
+
+
 def test_allows_a_public_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         net_guard.socket, "getaddrinfo", lambda host, port, **kw: [(2, 1, 6, "", ("93.184.216.34", 80))]

@@ -7,6 +7,18 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  optimizeDeps: {
+    // `graphiql/setup-workers/vite` imports monaco's workers with a `?worker`
+    // suffix. Vite's normal transform pipeline understands that suffix; the
+    // dep optimizer (rolldown) does not, and tries to load a file literally
+    // named `...worker.js?worker`, which does not exist.
+    //
+    // Dep optimization is all-or-nothing, so that one failure emitted NO
+    // pre-bundled deps at all — and `react-force-graph-2d`, an innocent
+    // bystander, 404'd on its dynamic import, leaving Explore's graph blank.
+    // Excluding the subpath keeps `graphiql` itself optimized.
+    exclude: ["graphiql/setup-workers/vite"],
+  },
   server: {
     // `app/lib/api.ts` calls the engine same-origin at `/api` — in the cluster
     // Traefik serves the app and the API on one host and the longer `/api`

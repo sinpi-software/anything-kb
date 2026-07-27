@@ -1,0 +1,49 @@
+[project]
+name = "claims"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.5",
+    "certifi>=2026.7.22",
+    "dotenv>=0.9.9",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "prefect>=3.8.0",
+    "psycopg2-binary>=2.9.12",
+    "pydantic>=2.13.4",
+    "sqlalchemy>=2.0.51",
+    "trafilatura>=2.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "db", "extract", "fetch", "llm", "models", "net_guard", "report", "serve", "submit", "verify"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["alembic/versions/", "\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["trafilatura.*", "prefect.*"]
+ignore_missing_imports = true
+
+[tool.alembic]
+script_location = "%(here)s/alembic"
+prepend_sys_path = ["."]

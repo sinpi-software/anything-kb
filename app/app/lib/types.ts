@@ -43,6 +43,14 @@ export interface CreatedApiKey {
   key: string;
 }
 
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  charter: string | null;
+  role: string;
+  created_at: string;
+}
+
 export interface EntityPage {
   id: string;
   name: string;

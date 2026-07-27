@@ -55,12 +55,10 @@ def _purge_user(email: str) -> None:
 def client() -> Iterator[TestClient]:
     from routes_auth import router as auth_router
     from routes_settings import router as settings_router
-    from routes_settings import scoped_router as settings_scoped_router
 
     app = FastAPI()
     app.include_router(auth_router)
     app.include_router(settings_router)
-    app.include_router(settings_scoped_router)
     yield TestClient(app, base_url="https://testserver", headers=LOCALHOST_ORIGIN)
 
 
@@ -79,6 +77,17 @@ def _register_and_verify(client: TestClient, email: str) -> None:
         s.commit()
 
 
+def _own_kb_id(email: str) -> str:
+    from db import get_postgres_session
+    from models import KnowledgeBaseUser, User
+
+    with get_postgres_session() as s:
+        user = s.query(User).filter(User.email == email).one()
+        return str(
+            s.query(KnowledgeBaseUser.knowledge_base_id).filter(KnowledgeBaseUser.user_id == user.id).one()[0]
+        )
+
+
 @requires_pg
 def test_get_config_has_the_default_vocabulary_for_a_fresh_account(client: TestClient) -> None:
     """register now creates a default config via create_knowledge_base — a fresh account
@@ -88,7 +97,8 @@ def test_get_config_has_the_default_vocabulary_for_a_fresh_account(client: TestC
     email = _unique_email()
     try:
         _register_and_verify(client, email)
-        resp = client.get("/api/config")
+        kb_id = _own_kb_id(email)
+        resp = client.get(f"/api/knowledge-bases/{kb_id}/config")
         assert resp.status_code == 200
         body = resp.json()
         assert body["interests"] == DEFAULT_INTERESTS
@@ -104,8 +114,9 @@ def test_put_then_get_roundtrips_config(client: TestClient) -> None:
     email = _unique_email()
     try:
         _register_and_verify(client, email)
+        kb_id = _own_kb_id(email)
         put = client.put(
-            "/api/config",
+            f"/api/knowledge-bases/{kb_id}/config",
             json={
                 "interests": "Is this about AI?",
                 "discover_types": False,
@@ -118,7 +129,7 @@ def test_put_then_get_roundtrips_config(client: TestClient) -> None:
             headers=LOCALHOST_ORIGIN,
         )
         assert put.status_code == 200
-        got = client.get("/api/config").json()
+        got = client.get(f"/api/knowledge-bases/{kb_id}/config").json()
         assert got["interests"] == "Is this about AI?"
         assert got["discover_types"] is False
         assert got["entity_types"] == [
@@ -135,8 +146,9 @@ def test_put_config_preserves_pinned_and_banned_flags(client: TestClient) -> Non
     email = _unique_email()
     try:
         _register_and_verify(client, email)
+        kb_id = _own_kb_id(email)
         put = client.put(
-            "/api/config",
+            f"/api/knowledge-bases/{kb_id}/config",
             json={
                 "interests": "Is this about AI?",
                 "discover_types": True,
@@ -153,7 +165,7 @@ def test_put_config_preserves_pinned_and_banned_flags(client: TestClient) -> Non
             {"name": "Person", "description": "a named human", "pinned": True, "banned": False},
             {"name": "Spam", "description": "not relevant", "pinned": False, "banned": True},
         ]
-        got = client.get("/api/config").json()
+        got = client.get(f"/api/knowledge-bases/{kb_id}/config").json()
         assert got["entity_types"] == [
             {"name": "Person", "description": "a named human", "pinned": True, "banned": False},
             {"name": "Spam", "description": "not relevant", "pinned": False, "banned": True},
@@ -167,8 +179,9 @@ def test_put_config_sanitizes_and_drops_blank_types(client: TestClient) -> None:
     email = _unique_email()
     try:
         _register_and_verify(client, email)
+        kb_id = _own_kb_id(email)
         put = client.put(
-            "/api/config",
+            f"/api/knowledge-bases/{kb_id}/config",
             json={
                 "interests": "keep\x00this",
                 "discover_types": True,
@@ -198,8 +211,9 @@ def test_put_config_is_403_when_email_unverified(client: TestClient) -> None:
     email = _unique_email()
     try:
         client.post("/api/auth/register", json={"email": email, "password": "hunter22"})
+        kb_id = _own_kb_id(email)
         resp = client.put(
-            "/api/config",
+            f"/api/knowledge-bases/{kb_id}/config",
             json={"interests": "x", "discover_types": True, "entity_types": [], "relationship_types": []},
             headers=LOCALHOST_ORIGIN,
         )
@@ -213,9 +227,10 @@ def test_put_config_requires_csrf_origin(client: TestClient) -> None:
     email = _unique_email()
     try:
         _register_and_verify(client, email)
+        kb_id = _own_kb_id(email)
         del client.headers["origin"]
         resp = client.put(
-            "/api/config",
+            f"/api/knowledge-bases/{kb_id}/config",
             json={"interests": "x", "discover_types": True, "entity_types": [], "relationship_types": []},
         )
         assert resp.status_code == 403
@@ -225,7 +240,8 @@ def test_put_config_requires_csrf_origin(client: TestClient) -> None:
 
 @requires_pg
 def test_config_requires_auth(client: TestClient) -> None:
-    assert client.get("/api/config").status_code == 401
+    kb_id = str(uuid.uuid4())
+    assert client.get(f"/api/knowledge-bases/{kb_id}/config").status_code == 401
 
 
 @requires_pg

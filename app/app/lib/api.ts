@@ -1,7 +1,7 @@
 // Client-side auth + API-key mutations. Same-origin `fetch` so the browser
 // carries the `session` cookie and sends `Origin` automatically — the
 // backend relies on both for CSRF protection.
-import type { ApiKey, CreatedApiKey, KbConfig, Me } from "./types";
+import type { ApiKey, CreatedApiKey, KbConfig, KnowledgeBase, Me } from "./types";
 
 const API_BASE = "/api";
 
@@ -70,13 +70,17 @@ export const resetPassword = (token: string, password: string): Promise<Me> =>
     body: JSON.stringify({ token, password }),
   });
 
-export const listKeys = (): Promise<ApiKey[]> => apiFetch<ApiKey[]>("/keys");
+export const listKeys = (kbId: string): Promise<ApiKey[]> =>
+  apiFetch<ApiKey[]>(`/knowledge-bases/${kbId}/keys`);
 
-export const createKey = (name: string): Promise<CreatedApiKey> =>
-  apiFetch<CreatedApiKey>("/keys", { method: "POST", body: JSON.stringify({ name }) });
+export const createKey = (kbId: string, name: string): Promise<CreatedApiKey> =>
+  apiFetch<CreatedApiKey>(`/knowledge-bases/${kbId}/keys`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 
-export const revokeKey = (id: string): Promise<void> =>
-  apiFetch<void>(`/keys/${id}`, { method: "DELETE" });
+export const revokeKey = (kbId: string, id: string): Promise<void> =>
+  apiFetch<void>(`/knowledge-bases/${kbId}/keys/${id}`, { method: "DELETE" });
 
 export interface JobAccepted {
   job_id: string;
@@ -91,13 +95,37 @@ export interface JobStatus {
   error: string | null;
 }
 
-export const ingestContent = (text: string, source?: string): Promise<JobAccepted> =>
-  apiFetch<JobAccepted>("/content", {
+export const ingestContent = (kbId: string, text: string, source?: string): Promise<JobAccepted> =>
+  apiFetch<JobAccepted>(`/knowledge-bases/${kbId}/content`, {
     method: "POST",
     body: JSON.stringify({ text, metadata: source ? { source } : {} }),
   });
 
-export const getJob = (jobId: string): Promise<JobStatus> => apiFetch<JobStatus>(`/content/${jobId}`);
+export const getJob = (kbId: string, jobId: string): Promise<JobStatus> =>
+  apiFetch<JobStatus>(`/knowledge-bases/${kbId}/content/${jobId}`);
 
-export const updateConfig = (config: KbConfig): Promise<KbConfig> =>
-  apiFetch<KbConfig>("/config", { method: "PUT", body: JSON.stringify(config) });
+export const updateConfig = (kbId: string, config: KbConfig): Promise<KbConfig> =>
+  apiFetch<KbConfig>(`/knowledge-bases/${kbId}/config`, {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
+
+export const createKnowledgeBase = (name: string, charter?: string): Promise<KnowledgeBase> =>
+  apiFetch<KnowledgeBase>("/knowledge-bases", {
+    method: "POST",
+    body: JSON.stringify({ name, charter: charter?.trim() || null }),
+  });
+
+export const renameKnowledgeBase = (id: string, name: string): Promise<KnowledgeBase> =>
+  apiFetch<KnowledgeBase>(`/knowledge-bases/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+
+// The API requires confirm_name to equal the current name exactly — the delete is
+// permanent and takes the knowledge base's graph with it.
+export const deleteKnowledgeBase = (id: string, confirmName: string): Promise<void> =>
+  apiFetch<void>(`/knowledge-bases/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });

@@ -11,8 +11,8 @@ import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { ApiError, createKey, logout, revokeKey } from "~/lib/api";
-import { APP_NAV_LINKS } from "~/lib/nav";
-import { getKeys, getMe } from "~/lib/auth.server";
+import { appNavLinks } from "~/lib/nav";
+import { KbNotFound, getKeys, getMe } from "~/lib/auth.server";
 import type { ApiKey, CreatedApiKey } from "~/lib/types";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/dashboard";
@@ -21,11 +21,16 @@ export function meta({}: Route.MetaArgs) {
   return [{ title: "Dashboard — anything/kb" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect("/login?next=/app");
-  const keys = await getKeys(request);
-  return { me, keys };
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}`);
+  try {
+    const keys = await getKeys(request, params.kbId);
+    return { me, keys, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 function formatDate(value: string | null): string {
@@ -55,7 +60,15 @@ function CreatedKeyCallout({ created, onDismiss }: { created: CreatedApiKey; onD
   );
 }
 
-function CreateKeyForm({ disabled, onCreated }: { disabled: boolean; onCreated: (key: CreatedApiKey) => void }) {
+function CreateKeyForm({
+  kbId,
+  disabled,
+  onCreated,
+}: {
+  kbId: string;
+  disabled: boolean;
+  onCreated: (key: CreatedApiKey) => void;
+}) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -65,7 +78,7 @@ function CreateKeyForm({ disabled, onCreated }: { disabled: boolean; onCreated: 
     setError(null);
     setSubmitting(true);
     try {
-      const created = await createKey(name);
+      const created = await createKey(kbId, name);
       setName("");
       onCreated(created);
     } catch (err) {
@@ -136,7 +149,7 @@ function KeyRow({ apiKey, onRevoke, revoking }: { apiKey: ApiKey; onRevoke: (id:
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { me, keys } = loaderData;
+  const { me, keys, kbId } = loaderData;
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
@@ -151,7 +164,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   async function handleRevoke(id: string) {
     setRevokingId(id);
     try {
-      await revokeKey(id);
+      await revokeKey(kbId, id);
       await revalidator.revalidate();
     } finally {
       setRevokingId(null);
@@ -163,12 +176,13 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     revalidator.revalidate();
   }
 
-  const primaryKnowledgeBase = me.knowledge_bases[0];
+  const currentKnowledgeBase = me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId);
 
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={currentKnowledgeBase?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             <LogOut className="size-3.5" aria-hidden="true" />
@@ -181,7 +195,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           Dashboard
         </p>
         <h1 className="mt-3.5 text-3xl font-semibold tracking-tight">{me.email}</h1>
-        {primaryKnowledgeBase ? <p className="mt-1 text-muted">{primaryKnowledgeBase.knowledge_base_name}</p> : null}
+        {currentKnowledgeBase ? <p className="mt-1 text-muted">{currentKnowledgeBase.knowledge_base_name}</p> : null}
 
         <div className="mt-8 flex flex-col gap-6">
           {!me.email_verified ? (
@@ -198,7 +212,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             </CardDescription>
 
             <div className="mt-6">
-              <CreateKeyForm disabled={!me.email_verified} onCreated={handleCreated} />
+              <CreateKeyForm kbId={kbId} disabled={!me.email_verified} onCreated={handleCreated} />
             </div>
 
             {keys.length > 0 ? (

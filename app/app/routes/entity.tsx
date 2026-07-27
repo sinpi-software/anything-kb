@@ -6,8 +6,8 @@ import remarkGfm from "remark-gfm";
 import { SiteHeader } from "~/components/site-header";
 import { Button } from "~/components/ui/button";
 import { logout } from "~/lib/api";
-import { getEntity, getMe } from "~/lib/auth.server";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { KbNotFound, getEntity, getMe } from "~/lib/auth.server";
+import { appNavLinks } from "~/lib/nav";
 import type { Route } from "./+types/entity";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -16,10 +16,15 @@ export function meta({ loaderData }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect(`/login?next=/app/entity/${params.id}`);
-  const entity = await getEntity(request, params.id);
-  if (!entity) throw new Response("Not found", { status: 404 });
-  return { me, entity };
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}/entity/${params.id}`);
+  try {
+    const entity = await getEntity(request, params.kbId, params.id);
+    if (!entity) throw new Response("Not found", { status: 404 });
+    return { me, entity, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 function formatDate(value: string): string {
@@ -29,7 +34,7 @@ function formatDate(value: string): string {
 }
 
 export default function Entity({ loaderData }: Route.ComponentProps) {
-  const { entity } = loaderData;
+  const { me, entity, kbId } = loaderData;
   const navigate = useNavigate();
 
   const groups = new Map<string, typeof entity.edges>();
@@ -55,7 +60,8 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             <LogOut className="size-3.5" aria-hidden="true" />
@@ -86,7 +92,7 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
                   <span className="font-display text-sm text-muted sm:w-40 sm:flex-none">{type}</span>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {edges.map((e) => (
-                      <Link key={e.target.id} to={`/app/entity/${e.target.id}`} className="text-accent hover:underline">
+                      <Link key={e.target.id} to={`/app/${kbId}/entity/${e.target.id}`} className="text-accent hover:underline">
                         {e.target.name} <span className="text-muted">· {e.target.type}</span>
                       </Link>
                     ))}
@@ -107,7 +113,7 @@ export default function Entity({ loaderData }: Route.ComponentProps) {
                   <span className="font-display text-sm text-muted sm:w-40 sm:flex-none">{type}</span>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {ents.map((e) => (
-                      <Link key={e.id} to={`/app/entity/${e.id}`} className="text-accent hover:underline">
+                      <Link key={e.id} to={`/app/${kbId}/entity/${e.id}`} className="text-accent hover:underline">
                         {e.name}
                       </Link>
                     ))}

@@ -2,12 +2,12 @@ import uuid
 from typing import Any
 
 import strawberry
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from graphql import GraphQLError
 from strawberry.fastapi import GraphQLRouter
 
 import graph_read
-from accounts import current_user, home_knowledge_base_id
+from accounts import current_user
 from auth import require_knowledge_base
 from db import get_postgres_session
 from knowledge import _iso_or_empty
@@ -139,28 +139,12 @@ async def get_context(knowledge_base_id: str = Depends(require_knowledge_base)) 
 graphql_router: GraphQLRouter[dict[str, Any], None] = GraphQLRouter(schema, context_getter=get_context)
 
 
-async def get_cookie_context(user: User = Depends(current_user)) -> dict[str, Any]:  # noqa: B008 — FastAPI idiom
-    """Resolve the knowledge base from the session cookie, for the logged-in explorer UI."""
-    with get_postgres_session() as session:
-        knowledge_base_id = home_knowledge_base_id(session, user.id)
-        if knowledge_base_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="no knowledge base found for this account"
-            )
-        require_membership(session, user.id, knowledge_base_id, "reader")
-    return {"knowledge_base_id": knowledge_base_id}
-
-
-# Session-authed router for the in-app GraphQL explorer (mounted at /api/graphql).
-cookie_graphql_router: GraphQLRouter[dict[str, Any], None] = GraphQLRouter(schema, context_getter=get_cookie_context)
-
-
-async def get_scoped_cookie_context(
+async def get_cookie_context(
     kb_id: str,
     user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom
 ) -> dict[str, Any]:
-    """Resolve the knowledge base from the path, for the explorer once sub-project B
-    passes it explicitly. Reading the graph needs `reader`."""
+    """Resolve the knowledge base from the path, for the session-authed explorer UI.
+    Reading the graph needs `reader`."""
     with get_postgres_session() as session:
         require_membership(session, user.id, kb_id, "reader")
         # Canonicalize after the authorization check: Postgres matches uppercase and
@@ -172,7 +156,6 @@ async def get_scoped_cookie_context(
     return {"knowledge_base_id": kb_id}
 
 
-# Mounted at /api/knowledge-bases/{kb_id}/graphql.
-scoped_cookie_graphql_router: GraphQLRouter[dict[str, Any], None] = GraphQLRouter(
-    schema, context_getter=get_scoped_cookie_context
-)
+# Session-authed router for the in-app GraphQL explorer (mounted at
+# /api/knowledge-bases/{kb_id}/graphql).
+cookie_graphql_router: GraphQLRouter[dict[str, Any], None] = GraphQLRouter(schema, context_getter=get_cookie_context)

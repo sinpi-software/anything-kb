@@ -10,8 +10,8 @@ import { Card, CardDescription, CardTitle } from "~/components/ui/card";
 import { Field, FieldLabel } from "~/components/ui/field";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError, logout, updateConfig } from "~/lib/api";
-import { getConfig, getMe } from "~/lib/auth.server";
-import { APP_NAV_LINKS } from "~/lib/nav";
+import { KbNotFound, getConfig, getMe } from "~/lib/auth.server";
+import { appNavLinks } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import type { Route } from "./+types/config";
 
@@ -19,17 +19,22 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Configure — anything/kb" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const me = await getMe(request);
-  if (!me) throw redirect("/login?next=/app/config");
-  const config = await getConfig(request);
-  return { me, config };
+  if (!me) throw redirect(`/login?next=/app/${params.kbId}/config`);
+  try {
+    const config = await getConfig(request, params.kbId);
+    return { me, config, kbId: params.kbId };
+  } catch (err) {
+    if (err instanceof KbNotFound) throw redirect("/app");
+    throw err;
+  }
 }
 
 type Save = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
 
 export default function Config({ loaderData }: Route.ComponentProps) {
-  const { me, config } = loaderData;
+  const { me, config, kbId } = loaderData;
   const navigate = useNavigate();
 
   const [interests, setInterests] = useState(config.interests);
@@ -46,7 +51,7 @@ export default function Config({ loaderData }: Route.ComponentProps) {
     if (disabled || saving) return;
     setSave({ kind: "saving" });
     try {
-      const next = await updateConfig({
+      const next = await updateConfig(kbId, {
         interests,
         discover_types: discoverTypes,
         entity_types: entities,
@@ -70,7 +75,8 @@ export default function Config({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-svh">
       <SiteHeader
-        navLinks={APP_NAV_LINKS}
+        navLinks={appNavLinks(kbId)}
+        kbName={me.knowledge_bases.find((kb) => kb.knowledge_base_id === kbId)?.knowledge_base_name}
         actions={
           <Button variant="outline" onClick={handleLogout} className="text-sm">
             Log out

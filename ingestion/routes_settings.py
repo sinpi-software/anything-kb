@@ -8,15 +8,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session as OrmSession
 
-from accounts import current_user, home_knowledge_base_id, require_csrf
+from accounts import current_user, require_csrf
 from db import get_postgres_session
 from memberships import require_membership
 from models import KnowledgeBaseConfig, User
 from sanitize import sanitize
 from schemas import ConfigRequest, ConfigResponse, TypeDef
 
-router = APIRouter(prefix="/api/config", tags=["Configuration"], dependencies=[Depends(require_csrf)])
-scoped_router = APIRouter(prefix="/api/knowledge-bases", tags=["Configuration"], dependencies=[Depends(require_csrf)])
+router = APIRouter(prefix="/api/knowledge-bases", tags=["Configuration"], dependencies=[Depends(require_csrf)])
 
 
 def _clean_types(values: list[TypeDef]) -> list[dict[str, Any]]:
@@ -43,18 +42,8 @@ def _get_config(session: OrmSession, kb_id: str) -> ConfigResponse:
     )
 
 
-@router.get("", response_model=ConfigResponse)
-def get_config(user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B008 — FastAPI dependency idiom
-    """Legacy: the knowledge base is implied. Sub-project B removes this."""
-    with get_postgres_session() as session:
-        kb_id = home_knowledge_base_id(session, user.id)
-        require_membership(session, user.id, kb_id, "reader")
-        assert kb_id is not None  # require_membership already 404s a None kb_id
-        return _get_config(session, kb_id)
-
-
-@scoped_router.get("/{kb_id}/config", response_model=ConfigResponse)
-def get_config_scoped(kb_id: str, user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B008
+@router.get("/{kb_id}/config", response_model=ConfigResponse)
+def get_config(kb_id: str, user: User = Depends(current_user)) -> ConfigResponse:  # noqa: B008
     with get_postgres_session() as session:
         require_membership(session, user.id, kb_id, "reader")
         return _get_config(session, kb_id)
@@ -89,23 +78,8 @@ def _put_config(session: OrmSession, kb_id: str, body: ConfigRequest) -> ConfigR
     )
 
 
-@router.put("", response_model=ConfigResponse)
+@router.put("/{kb_id}/config", response_model=ConfigResponse)
 def put_config(
-    body: ConfigRequest,
-    user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom
-) -> ConfigResponse:
-    """Legacy: the knowledge base is implied. Sub-project B removes this."""
-    if not user.email_verified:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="verify your email to edit configuration")
-    with get_postgres_session() as session:
-        kb_id = home_knowledge_base_id(session, user.id)
-        require_membership(session, user.id, kb_id, "admin")
-        assert kb_id is not None  # require_membership already 404s a None kb_id
-        return _put_config(session, kb_id, body)
-
-
-@scoped_router.put("/{kb_id}/config", response_model=ConfigResponse)
-def put_config_scoped(
     kb_id: str,
     body: ConfigRequest,
     user: User = Depends(current_user),  # noqa: B008 — FastAPI dependency idiom

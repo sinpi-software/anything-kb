@@ -6,6 +6,11 @@ kind = "files"
 path = "./drop"
 title = "Manual drop"
 
+[[sources]]
+kind = "rss"
+url = "https://hnrss.org/frontpage"
+title = "Hacker News"
+
 # [[sources]]
 # kind = "rss"
 # url = "https://example.com/feed.xml"

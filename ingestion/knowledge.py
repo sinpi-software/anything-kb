@@ -347,32 +347,66 @@ def _derive_abstract(text: str) -> str:
 
 
 def synthesize_article(
-    client: OpenRouter, model: str, existing_article: str, new_info: str, llm_params: dict[str, Any]
+    client: OpenRouter,
+    model: str,
+    entity_name: str,
+    entity_type: str,
+    existing_article: str,
+    new_info: str,
+    llm_params: dict[str, Any],
 ) -> ArticleResult:
+    """The living article for one entity, named explicitly.
+
+    The name and type are not decoration. Without them this function saw only description text, so
+    a description that mentioned another entity more prominently than its own subject hijacked the
+    article — "Presidential candidate who held a rally at Moda Center." produced an article about
+    Moda Center, stored on the Bernie Sanders node.
+    """
     messages = [
         {
             "role": "system",
             "content": (
-                "You maintain an encyclopedia article about one entity as a living document. Integrate "
-                "the new information into the existing article: a lead paragraph, then `## Section` "
-                "headings as the material warrants. Keep all existing facts, add the new ones, and note "
-                "contradictions. Do NOT add a References or Sources section and do NOT add inline "
-                "citations — sources are tracked separately. Also produce a one-to-two-sentence abstract."
+                f"You maintain an encyclopedia article about one entity as a living document. The "
+                f"subject is: {entity_name} ({entity_type}). Write about that subject and no other, "
+                "however prominently another entity features in the material below.\n\n"
+                "Structure the article as:\n"
+                "`## Background` — what you reliably know about this subject from established "
+                "knowledge, written only when you can positively identify it. If the name is "
+                "ambiguous, or you are not confident this is a subject you know, omit this section "
+                "entirely rather than guessing. Never invent specifics.\n"
+                "`## From sources` — what the ingested material states, and only that.\n\n"
+                # The References list on an entity page accounts for the ingested sources. Anything the
+                # model supplies from training has no such provenance, so it is kept under its own
+                # heading rather than blended, letting a reader see which claims a source backs.
+                "Keep the two separate: the sources shown alongside this article account for the "
+                "second section only. Integrate new information into the existing article, keeping "
+                "all existing facts and noting contradictions. Do NOT add a References or Sources "
+                "section and do NOT add inline citations. Also produce a one-to-two-sentence abstract."
             ),
         },
-        {"role": "user", "content": f"Existing article:\n{existing_article}\n\nNew source:\n{new_info}"},
+        {
+            "role": "user",
+            "content": (
+                f"Subject: {entity_name} ({entity_type})\n\n"
+                f"Existing article:\n{existing_article}\n\nNew source:\n{new_info}"
+            ),
+        },
     ]
     schema = {
         "type": "json_schema",
         "json_schema": {"name": "article", "strict": True, "schema": _strict_schema(ArticleResult.model_json_schema())},
     }
+    # Falling back to existing_article alone would blank a first sighting, where it is "" — a
+    # synthesis failure would then throw the description away entirely, leaving the entity worse
+    # off than if synthesis had never run.
+    fallback = existing_article or new_info
     out = _chat(client, model, messages, llm_params, schema)
     if not out:
-        return ArticleResult(abstract=_derive_abstract(existing_article), article=existing_article)
+        return ArticleResult(abstract=_derive_abstract(fallback), article=fallback)
     try:
         return ArticleResult.model_validate_json(out)
     except ValidationError:
-        return ArticleResult(abstract=_derive_abstract(existing_article), article=existing_article)
+        return ArticleResult(abstract=_derive_abstract(fallback), article=fallback)
 
 
 def upsert_entity(
@@ -668,7 +702,15 @@ def merge_content(
                 existing_id = assigned_in_batch.get(batch_key)
             if existing_id is None:
                 entity_id = str(uuid.uuid4())
-                article, summary = entity.description, _derive_abstract(entity.description)
+                # A first sighting is synthesized too, with nothing to merge into. Storing the raw
+                # description instead saved one LLM call and cost the knowledge base its substance:
+                # article richness tracked merge count exactly, and because most entities are named
+                # by a single document, the great majority of the graph stayed a short stub that
+                # nothing would ever revisit — and never gained a `## Background` section at all.
+                result = synthesize_article(
+                    client, config.LLM_MODEL, entity.name, entity.type, "", entity.description, llm_params
+                )
+                article, summary = result.article, result.abstract
                 created += 1
             else:
                 entity_id = existing_id
@@ -677,7 +719,9 @@ def merge_content(
                     {"id": entity_id, "knowledge_base_id": knowledge_base_id},
                 ).single()
                 existing_article = row["a"] if row and row["a"] else ""
-                result = synthesize_article(client, config.LLM_MODEL, existing_article, entity.description, llm_params)
+                result = synthesize_article(
+                    client, config.LLM_MODEL, entity.name, entity.type, existing_article, entity.description, llm_params
+                )
                 article, summary = result.article, result.abstract
                 merged += 1
             upsert_entity(neo, knowledge_base_id, entity_id, entity, summary, article)

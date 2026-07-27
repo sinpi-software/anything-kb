@@ -1,10 +1,10 @@
 """SSRF guard for outbound fetches of operator-supplied URLs.
 
-Source URLs come from neonews.toml and from third-party feeds, then get fetched
-server-side. Without a guard, `http://169.254.169.254/…` or an in-cluster address
-like `ingestion-postgres:5432` would be fetched and its response handed onward — a
-classic SSRF into the cluster network. Every hop (initial request and each redirect)
-passes through `assert_public_url`.
+Claims fetches exactly one kind of URL through this module: the page an operator
+submits via `submit-url`. Without a guard, `http://169.254.169.254/…` or an
+in-cluster address like `ingestion-postgres:5432` would be fetched and its response
+handed onward — a classic SSRF into the cluster network. Every hop (initial request
+and each redirect) passes through `assert_public_url`.
 
 Copied from neonews/net_guard.py — claims is a standalone project and imports nothing from it.
 """

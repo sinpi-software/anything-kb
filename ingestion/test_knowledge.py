@@ -124,6 +124,18 @@ def test_build_extraction_messages_bars_vague_phrase_entities(discover: bool) ->
 
 
 @pytest.mark.parametrize("discover", [True, False])
+def test_build_extraction_messages_bars_topic_and_action_entities(discover: bool) -> None:
+    msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
+    joined = " ".join(m["content"] for m in msgs).lower()
+    # A node for a subject label ("Antitrust") or a one-off action ("EU fine against Google") has no
+    # specific relation to its participants, so every edge it owns falls back to the catch-all: in a
+    # real ingest Topic entities were 95% "Related to", Law 81% and Event 75%, against 20% for Person.
+    # "named event" alone read as permission to mint those, so name the failure mode explicitly.
+    assert "subject or theme label" in joined
+    assert "state as a relationship" in joined
+
+
+@pytest.mark.parametrize("discover", [True, False])
 def test_build_extraction_messages_pushes_relationship_completeness(discover: bool) -> None:
     msgs = build_extraction_messages([{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover)
     joined = " ".join(m["content"] for m in msgs).lower()

@@ -12,7 +12,13 @@ LLM_MODEL = "openai/gpt-5-nano"
 # a capability ceiling rather than a prompt defect. It is also the highest-volume call — once per
 # ingested item — so this is the expensive choice made deliberately, and only here: relevance
 # judging is a cheap yes/no and synthesis touches only the minority of entities that recur.
-EXTRACTION_MODEL = "anthropic/claude-haiku-4.5"
+# Benchmarked against five alternatives on one article, same prompt. Beat gpt-5-nano decisively
+# (226 vs 100 average description characters) and came within 9% of anthropic/claude-haiku-4.5's
+# 247 at a twenty-fifth of the input price — while producing 25 distinct relationship types to
+# haiku's 3, which matters more here, since a vocabulary collapsed onto one catch-all type was the
+# defect this pipeline just spent a long night fixing. Cheaper on output than the gpt-5-nano it
+# replaces ($0.17 against $0.40 per M).
+EXTRACTION_MODEL = "openai/gpt-oss-120b"
 # The salience/type-admission gate (consolidate_types) runs on a more capable model:
 # it is low-volume (once per novel type) and is the sole guard against fragment types.
 TYPE_GATE_MODEL = "openai/gpt-5-mini"

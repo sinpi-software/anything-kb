@@ -41,7 +41,11 @@ def _unchecked_reason(claim: Claim) -> str:
         return f"could not be checked: {claim.error or 'unknown error'}"
     if claim.claim_type != config.CHECKABLE_CLAIM_TYPE:
         return claim.claim_type
-    return f"below the checkworthiness floor ({claim.checkworthiness:.2f})"
+    if claim.checkworthiness < config.CHECKWORTHINESS_MIN:
+        return f"below the checkworthiness floor ({claim.checkworthiness:.2f})"
+    # Clears the floor but ranked outside VERIFY_MAX_PER_DOCUMENT. Saying "below the
+    # floor" here would be false — the claim was crowded out, not judged too weak.
+    return f"not among the {config.VERIFY_MAX_PER_DOCUMENT} most checkworthy claims"
 
 
 def _attribution_line(claim: Claim) -> str:
@@ -62,7 +66,7 @@ def render_report(
     evidence_by_claim: dict[str, list[Evidence]],
     generated_at: datetime,
 ) -> str:
-    judged = [claim for claim in claims if claim.verdict]
+    judged = [claim for claim in claims if claim.verdict is not None]
     tally: dict[str, int] = defaultdict(int)
     for claim in judged:
         tally[str(claim.verdict)] += 1
@@ -107,7 +111,7 @@ def render_report(
             lines.append(f"- **{label}:** [{evidence.title or evidence.url}]({evidence.url}){snippet}")
         lines.append("")
 
-    unchecked = [claim for claim in claims if not claim.verdict]
+    unchecked = [claim for claim in claims if claim.verdict is None]
     if unchecked:
         lines += ["## Not checked", ""]
         lines += [f'- "{claim.text}" — {_unchecked_reason(claim)}' for claim in unchecked]
@@ -149,7 +153,7 @@ def report_documents() -> dict[str, int]:
             markdown = render_report(document, claims, evidence_by_claim, generated_at)
             output_dir = Path(config.OUTPUT_DIR)
             output_dir.mkdir(parents=True, exist_ok=True)
-            path = output_dir / f"{_slug(document)}-{generated_at.strftime('%Y-%m-%d-%H%M')}.md"
+            path = output_dir / f"{_slug(document)}-{generated_at.strftime('%Y-%m-%d-%H%M%S')}.md"
             path.write_text(markdown, encoding="utf-8")
 
             session.add(
@@ -158,7 +162,7 @@ def report_documents() -> dict[str, int]:
                     generated_at=generated_at,
                     path=str(path),
                     claim_count=len(claims),
-                    verified_count=sum(1 for claim in claims if claim.verdict),
+                    verified_count=sum(1 for claim in claims if claim.verdict is not None),
                     body=markdown,
                 )
             )

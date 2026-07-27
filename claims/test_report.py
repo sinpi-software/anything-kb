@@ -50,12 +50,19 @@ def test_render_report_separates_unchecked_claims_by_reason() -> None:
         _claim(text="Turnout was low.", checkworthiness=0.1),
         _claim(text="Bonds totalled $4.2M.", selected_for_verification=True, attempts=config.MAX_VERIFY_ATTEMPTS,
                error="provider down"),
+        # Clears the floor (0.85 > CHECKWORTHINESS_MIN) but was never selected: crowded
+        # out by VERIFY_MAX_PER_DOCUMENT, not too weak. Must not read "below the floor".
+        _claim(text="The levy raised $9M.", checkworthiness=0.85),
     ]
     markdown = render_report(_document(), claims, {}, generated_at=datetime.now(UTC))
     assert "predictive" in markdown
     assert "normative" in markdown
     assert "could not be checked" in markdown
     assert "provider down" in markdown
+    assert "below the checkworthiness floor (0.10)" in markdown
+    assert "not among the" in markdown and "most checkworthy claims" in markdown
+    levy_line = next(line for line in markdown.splitlines() if "The levy raised $9M." in line)
+    assert "below the checkworthiness floor" not in levy_line
 
 
 def test_render_report_handles_a_document_with_no_claims() -> None:
@@ -67,7 +74,7 @@ def test_render_report_handles_a_document_with_no_claims() -> None:
 def scenario() -> Any:
     document_ids: list[str] = []
 
-    def _make(claims: list[dict[str, Any]]) -> str:
+    def _make(claims: list[dict[str, Any]], evidence: dict[int, list[dict[str, Any]]] | None = None) -> str:
         with get_postgres_session() as session:
             document = Document(
                 url=f"https://example.com/{os.urandom(4).hex()}",
@@ -78,8 +85,15 @@ def scenario() -> Any:
             )
             session.add(document)
             session.flush()
+            claim_rows = []
             for spec in claims:
-                session.add(_claim(document_id=document.id, **spec))
+                claim = _claim(document_id=document.id, **spec)
+                session.add(claim)
+                claim_rows.append(claim)
+            session.flush()
+            for index, items in (evidence or {}).items():
+                for item in items:
+                    session.add(Evidence(claim_id=claim_rows[index].id, **item))
             session.commit()
             document_ids.append(str(document.id))
             return str(document.id)
@@ -132,6 +146,21 @@ def test_report_writes_the_row_and_stamps_the_document(scenario: Any) -> None:
         document = session.get(Document, document_id)
         assert document is not None
         assert document.reported_at is not None
+
+
+def test_report_includes_persisted_evidence(scenario: Any) -> None:
+    """The flow's write side keys evidence_by_claim by str(claim.id): a raw UUID key
+    would never match the lookup in render_report, and evidence would silently vanish
+    from every report while both gates (mypy, the rest of the suite) stayed green."""
+    document_id = scenario(
+        [{"selected_for_verification": True, "verdict": "supported", "confidence": 0.9, "rationale": "Checks out."}],
+        evidence={0: [{"url": "https://real.test/levy", "title": "County ledger", "stance": "supports"}]},
+    )
+    report_documents()
+    with get_postgres_session() as session:
+        report = session.scalars(select(Report).where(Report.document_id == document_id)).one()
+        assert "https://real.test/levy" in (report.body or "")
+        assert "County ledger" in (report.body or "")
 
 
 def test_report_does_not_report_the_same_document_twice(scenario: Any) -> None:

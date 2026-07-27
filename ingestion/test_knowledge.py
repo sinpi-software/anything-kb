@@ -309,6 +309,36 @@ def test_synthesize_article_separates_uncited_background_from_sourced_material(
     assert "positively identify" in prompt  # background is gated on actually knowing the subject
 
 
+def test_synthesize_article_forbids_restating_the_lead_in_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lead paragraph and `## Background` were saying the same thing twice.
+
+    The real United States entry opened with "a federal republic located in North America. It
+    comprises 50 states, a federal district..." and then `## Background` repeated "a federal
+    constitutional republic located in North America. It comprises 50 states, a federal district..."
+    almost verbatim. Nothing told the model the two must not overlap, and "encyclopedia article"
+    implies a lead strongly enough that it writes one regardless.
+    """
+    from knowledge import ArticleResult, synthesize_article
+
+    seen: dict[str, Any] = {}
+
+    def _capture(client: Any, model: str, messages: list[dict[str, str]], params: Any, schema: Any = None) -> str:
+        seen["prompt"] = " ".join(m["content"] for m in messages)
+        return ArticleResult(abstract="a", article="b").model_dump_json()
+
+    monkeypatch.setattr(knowledge_mod, "_chat", _capture)
+    synthesize_article(
+        client=None,  # type: ignore[arg-type]
+        model="m",
+        entity_name="Ada Lovelace",
+        entity_type="Person",
+        existing_article="",
+        new_info="d",
+        llm_params={},
+    )
+    assert "do not repeat" in seen["prompt"].lower()
+
+
 def test_synthesize_article_falling_back_never_blanks_a_first_sighting(monkeypatch: pytest.MonkeyPatch) -> None:
     """Both fallbacks returned `existing_article`, which is "" for a first sighting — so a synthesis
     failure would store an empty article and lose the description entirely. Falling back to the new

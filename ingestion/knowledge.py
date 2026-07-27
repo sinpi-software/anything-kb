@@ -370,6 +370,14 @@ def synthesize_article(
                 f"subject is: {entity_name} ({entity_type}). Write about that subject and no other, "
                 "however prominently another entity features in the material below.\n\n"
                 "Structure the article as:\n"
+                # "Encyclopedia article" implies a lead strongly enough that the model writes one
+                # whether or not it is asked to, and with nothing forbidding overlap it then restated
+                # that lead as Background: the real United States entry opened with "a federal
+                # republic located in North America. It comprises 50 states, a federal district…"
+                # and repeated it almost verbatim one heading later.
+                "a single opening sentence identifying the subject, then the sections below. Do not "
+                "repeat the opening sentence in any section — each section adds what the lead does "
+                "not already say.\n"
                 "`## Background` — what you reliably know about this subject from established "
                 "knowledge, written only when you can positively identify it. If the name is "
                 "ambiguous, or you are not confident this is a subject you know, omit this section "

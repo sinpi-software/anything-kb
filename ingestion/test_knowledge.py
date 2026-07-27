@@ -135,6 +135,20 @@ def test_build_extraction_messages_pushes_relationship_completeness(discover: bo
     assert "name of an entity in your entities list" in joined
 
 
+def test_extraction_uses_its_own_model_constant() -> None:
+    """Extraction is the one call whose output becomes permanent article text.
+
+    A new entity's article is its extracted description stored verbatim — synthesize_article runs
+    only on merge, and most entities are named by exactly one document, so extraction authors the
+    great majority of the knowledge base. It is also the highest-volume call, hit once per ingested
+    item. Those two facts pull in opposite directions on cost, so extraction gets its own constant:
+    relevance judging is a cheap yes/no that does not need the same model, and synthesis only runs
+    on the small minority of entities that recur.
+    """
+    assert config.EXTRACTION_MODEL
+    assert config.EXTRACTION_MODEL != config.LLM_MODEL, "the split is pointless if both are the same"
+
+
 @pytest.mark.parametrize("discover", [True, False])
 def test_build_extraction_messages_demands_a_self_contained_description(discover: bool) -> None:
     """For most entities the description IS the article, permanently — synthesize_article runs

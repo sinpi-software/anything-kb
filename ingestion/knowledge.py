@@ -584,7 +584,7 @@ def merge_content(
     with OpenRouter(api_key=os.environ[config.OPENROUTER_API_KEY_ENV]) as client, get_neo4j_session() as neo:
         extraction = extract_knowledge(
             client,
-            config.LLM_MODEL,
+            config.EXTRACTION_MODEL,
             entity_types,
             relationship_types,
             content,

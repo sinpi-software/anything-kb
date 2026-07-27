@@ -2,8 +2,17 @@
 
 # --- LLM (OpenRouter) ---
 OPENROUTER_API_KEY_ENV = "INGESTION_OPENROUTER_API_KEY"
-# Default model for relevance judging, extraction, resolution, and synthesis.
+# Default model for relevance judging and article synthesis.
 LLM_MODEL = "openai/gpt-5-nano"
+# Extraction gets its own model, and the most capable one in the stack. A new entity's article is
+# its extracted description stored verbatim — synthesize_article runs only when an entity is merged,
+# and most entities are named by exactly one document, so extraction authors the great majority of
+# the knowledge base and nothing revisits it. Measured on gpt-5-nano, descriptions averaged ~100
+# characters however the prompt was worded ("Town in Oregon where Randy Stapilus resides"), which is
+# a capability ceiling rather than a prompt defect. It is also the highest-volume call — once per
+# ingested item — so this is the expensive choice made deliberately, and only here: relevance
+# judging is a cheap yes/no and synthesis touches only the minority of entities that recur.
+EXTRACTION_MODEL = "anthropic/claude-haiku-4.5"
 # The salience/type-admission gate (consolidate_types) runs on a more capable model:
 # it is low-volume (once per novel type) and is the sole guard against fragment types.
 TYPE_GATE_MODEL = "openai/gpt-5-mini"

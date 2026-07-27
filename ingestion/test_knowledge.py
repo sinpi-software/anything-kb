@@ -136,6 +136,24 @@ def test_build_extraction_messages_pushes_relationship_completeness(discover: bo
 
 
 @pytest.mark.parametrize("discover", [True, False])
+def test_build_extraction_messages_demands_a_self_contained_description(discover: bool) -> None:
+    """For most entities the description IS the article, permanently — synthesize_article runs
+    only on merge, and in a real ingest 178 of 193 entities were named by exactly one document.
+    Those averaged 169 characters against 5,613 for the one entity mentioned nine times.
+
+    The instruction this replaces was a single trailing clause, and compliance was erratic: it
+    produced "Founder of the Trail Blazers in 1970." and "Town in Oregon where Randy Stapilus
+    resides" as readily as a real paragraph. Both are defined by their relation to something else
+    in the same document, which is exactly what a standalone entry must not do."""
+    msgs = build_extraction_messages(
+        [{"name": "Person", "description": ""}], [], "x", interests="i", discover=discover
+    )
+    joined = " ".join(m["content"] for m in msgs).lower()
+    assert "stands on its own" in joined
+    assert "role in this text" in joined  # names the failure mode, not just the goal
+
+
+@pytest.mark.parametrize("discover", [True, False])
 def test_build_extraction_messages_demands_a_specific_relationship_type(discover: bool) -> None:
     """The completeness rule pushes hard for coverage — "connect every entity" — and says nothing
     about how precise the relationship type must be. With a catch-all named "Related to" in the

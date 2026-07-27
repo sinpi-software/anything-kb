@@ -74,6 +74,25 @@ def _render_types(types: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+# For most entities the description IS the article, permanently: synthesize_article runs only when
+# an entity is merged, and in a real ingest 178 of 193 entities were named by exactly one document.
+# Those averaged 169 characters against 5,613 for the one entity mentioned nine times. The single
+# trailing clause this replaces ("a rich paragraph, not a label") was followed erratically — it also
+# produced "Founder of the Trail Blazers in 1970." and "Town in Oregon where Randy Stapilus resides",
+# both defined by their relation to something else in the same document. State the standard the way
+# _ENTITY_QUALITY does, naming the failure mode rather than only the goal.
+_DESCRIPTION_QUALITY = (
+    "For each entity write a description that stands on its own as an encyclopedia entry: identify "
+    "what the subject IS, for a reader who has never seen this document. Lead with the subject's own "
+    "identity rather than its role in this text — 'a US senator from Vermont and two-time "
+    "presidential candidate', never 'presidential candidate who held a rally at the Moda Center'. "
+    "Never define a subject solely by its relation to another entity mentioned here. Use what you "
+    "reliably know about a well-known subject to establish that identity, then add what this "
+    "document specifically contributes; if you do not know the subject, say only what the document "
+    "supports rather than inventing detail. Several sentences at minimum — a bare label or a single "
+    "relative clause is not acceptable."
+)
+
 # Keeps vague noun-phrases (e.g. "a two-year legal battle") out of the graph as their own nodes.
 _ENTITY_QUALITY = (
     "Only extract entities that are concrete, specific, and individually significant — a distinct, "
@@ -140,7 +159,7 @@ def build_extraction_messages(
             "genuinely distinct from every existing one, name it in sentence case ('Charged by', "
             "'Detained at', 'Acquired') rather than falling back on a vague existing type.\n\n"
             f"{_ENTITY_QUALITY}\n\n"
-            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
+            f"{_DESCRIPTION_QUALITY}\n\n"
             f"{_RELATIONSHIP_COMPLETENESS}"
         )
     else:
@@ -148,7 +167,7 @@ def build_extraction_messages(
             f"{lens}"
             f"Extract only entities of these types:\n{_render_types(entity_types)}\n\n"
             f"{_ENTITY_QUALITY}\n\n"
-            "For each entity, write a thorough, self-contained description (a rich paragraph, not a label).\n\n"
+            f"{_DESCRIPTION_QUALITY}\n\n"
             f"Also extract relationships, using only these relationship types:\n{_render_types(relationship_types)}\n\n"
             "Use the exact type names given; do not invent new ones.\n\n"
             f"{_RELATIONSHIP_COMPLETENESS}"
